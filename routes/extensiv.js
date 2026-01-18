@@ -89,9 +89,9 @@ router.post('/test-connection', async (req, res) => {
     // Step 1: Get access token
     const accessToken = await getAccessToken(clientId, clientSecret, customerId, userLoginId);
 
-    // Step 2: Validate token by calling a real API endpoint
-    // Using the inventory stock summaries endpoint as a lightweight test
-    const testUrl = `${EXTENSIV_BASE_URL}/inventory/stocksummaries?customerid=${customerId}&facilityid=${facilityId}&pgsiz=1&pgnum=1`;
+    // Step 2: Validate token by calling a simple API endpoint
+    // Using the customers endpoint which doesn't require query parameters
+    const testUrl = `${EXTENSIV_BASE_URL}/customers/${customerId}`;
     
     const testResponse = await fetch(testUrl, {
       method: 'GET',
@@ -107,7 +107,7 @@ router.post('/test-connection', async (req, res) => {
       throw new Error(`API validation failed: ${testResponse.status} ${errorText}`);
     }
 
-    const testData = await testResponse.json();
+    const customerData = await testResponse.json();
 
     // Connection successful
     res.json({
@@ -117,7 +117,8 @@ router.post('/test-connection', async (req, res) => {
       apiValidated: true,
       customerId: customerId,
       facilityId: facilityId,
-      testEndpoint: 'inventory/stocksummaries',
+      customerName: customerData.name || 'Unknown',
+      testEndpoint: 'customers',
     });
   } catch (error) {
     console.error('Extensiv connection test failed:', error);
@@ -147,8 +148,8 @@ router.post('/get-inventory', async (req, res) => {
     // Get access token (cached if available)
     const accessToken = await getAccessToken(clientId, clientSecret, customerId, userLoginId);
 
-    // Make API call to get inventory
-    const url = `${EXTENSIV_BASE_URL}/inventory/stocksummaries?customerid=${customerId}&facilityid=${facilityId}&pgsiz=${pageSize}&pgnum=${pageNum}`;
+    // Make API call to get inventory - using headers instead of query params
+    const url = `${EXTENSIV_BASE_URL}/inventory/stocksummaries`;
     
     const response = await fetch(url, {
       method: 'GET',
@@ -156,6 +157,8 @@ router.post('/get-inventory', async (req, res) => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/hal+json',
         'Accept': 'application/hal+json',
+        'X-Customer-Id': customerId,
+        'X-Facility-Id': facilityId,
       },
     });
 
@@ -202,8 +205,6 @@ router.post('/get-orders', async (req, res) => {
     let url = `${EXTENSIV_BASE_URL}/orders`;
     if (orderId) {
       url += `/${orderId}?detail=All`;
-    } else {
-      url += `?customerid=${customerId}&facilityid=${facilityId}`;
     }
 
     const response = await fetch(url, {
@@ -212,6 +213,8 @@ router.post('/get-orders', async (req, res) => {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/hal+json',
         'Accept': 'application/hal+json',
+        'X-Customer-Id': customerId,
+        'X-Facility-Id': facilityId,
       },
     });
 
