@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import smartsheetRoutes from './routes/smartsheet.js';
 import extensivRoutes from './routes/extensiv.js';
+import credentialsRoutes from './routes/credentials.js';
 
 dotenv.config();
 
@@ -16,6 +17,10 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
+
 app.use(express.json());
 
 // Health check endpoint
@@ -26,6 +31,7 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/smartsheet', smartsheetRoutes);
 app.use('/api/extensiv', extensivRoutes);
+app.use('/api/credentials', credentialsRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -39,4 +45,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Backend API server running on http://localhost:${PORT}`);
   console.log(`📡 CORS enabled for all origins (App Viewer compatible)`);
+  console.log(`✅ Preflight OPTIONS requests handled`);
 });
