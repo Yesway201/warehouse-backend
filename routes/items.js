@@ -3,13 +3,34 @@ import { createClient } from '@supabase/supabase-js';
 
 const router = express.Router();
 
-// Initialize Supabase client
+// Initialize Supabase client only if credentials are provided
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+// Middleware to check if Supabase is configured
+const requireSupabase = (req, res, next) => {
+  if (!supabase) {
+    return res.status(503).json({ 
+      success: false, 
+      error: 'Supabase is not configured. Please add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables in Railway.',
+      configured: false
+    });
+  }
+  next();
+};
+
+// Health check endpoint (doesn't require Supabase)
+router.get('/health', (req, res) => {
+  res.json({ 
+    success: true, 
+    configured: !!supabase,
+    message: supabase ? 'Items API is ready' : 'Supabase not configured'
+  });
+});
 
 // Get all items (optionally filtered by customer)
-router.get('/', async (req, res) => {
+router.get('/', requireSupabase, async (req, res) => {
   try {
     const { customerId } = req.query;
     
@@ -34,7 +55,7 @@ router.get('/', async (req, res) => {
 });
 
 // Get sync status for a customer
-router.get('/sync-status/:customerId', async (req, res) => {
+router.get('/sync-status/:customerId', requireSupabase, async (req, res) => {
   try {
     const { customerId } = req.params;
     
@@ -54,7 +75,7 @@ router.get('/sync-status/:customerId', async (req, res) => {
 });
 
 // Sync items from Extensiv for a specific customer
-router.post('/sync', async (req, res) => {
+router.post('/sync', requireSupabase, async (req, res) => {
   try {
     const { customerId, items } = req.body;
     
@@ -149,7 +170,7 @@ router.post('/sync', async (req, res) => {
 });
 
 // Add a single item manually
-router.post('/', async (req, res) => {
+router.post('/', requireSupabase, async (req, res) => {
   try {
     const { itemNumber, description, uom, category, customerId, barcode } = req.body;
     
@@ -186,7 +207,7 @@ router.post('/', async (req, res) => {
 });
 
 // Update an item
-router.put('/:itemNumber', async (req, res) => {
+router.put('/:itemNumber', requireSupabase, async (req, res) => {
   try {
     const { itemNumber } = req.params;
     const { description, uom, category, customerId, barcode } = req.body;
@@ -218,7 +239,7 @@ router.put('/:itemNumber', async (req, res) => {
 });
 
 // Delete an item
-router.delete('/:itemNumber', async (req, res) => {
+router.delete('/:itemNumber', requireSupabase, async (req, res) => {
   try {
     const { itemNumber } = req.params;
     const { customerId } = req.query;
