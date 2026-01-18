@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import smartsheetRoutes from './routes/smartsheet.js';
 import extensivRoutes from './routes/extensiv.js';
 import credentialsRoutes from './routes/credentials.js';
+import itemsRoutes from './routes/items.js';
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ app.get('/health', (req, res) => {
 app.use('/api/smartsheet', smartsheetRoutes);
 app.use('/api/extensiv', extensivRoutes);
 app.use('/api/credentials', credentialsRoutes);
+app.use('/api/items', itemsRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
