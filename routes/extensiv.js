@@ -73,6 +73,8 @@ async function getAccessToken(clientId, clientSecret, customerId, userLoginId) {
  * Test Extensiv Connection
  * POST /api/extensiv/test-connection
  * Body: { clientId, clientSecret, customerId, facilityId, userLoginId }
+ * 
+ * SIMPLIFIED: Only tests OAuth token acquisition, no additional API calls
  */
 router.post('/test-connection', async (req, res) => {
   try {
@@ -86,39 +88,18 @@ router.post('/test-connection', async (req, res) => {
       });
     }
 
-    // Step 1: Get access token - this validates OAuth credentials
+    // Get access token - this validates OAuth credentials
+    // If this succeeds, the credentials are valid
     const accessToken = await getAccessToken(clientId, clientSecret, customerId, userLoginId);
 
-    // Step 2: Validate token by calling the facilities endpoint
-    // This is a simple endpoint that just lists facilities
-    const testUrl = `${EXTENSIV_BASE_URL}/facilities`;
-    
-    const testResponse = await fetch(testUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/hal+json',
-        'Accept': 'application/hal+json',
-      },
-    });
-
-    if (!testResponse.ok) {
-      const errorText = await testResponse.text();
-      throw new Error(`API validation failed: ${testResponse.status} ${errorText}`);
-    }
-
-    const facilitiesData = await testResponse.json();
-
-    // Connection successful
+    // Connection successful - OAuth token obtained
     res.json({
       success: true,
       message: 'Successfully connected to Extensiv API',
       tokenReceived: true,
-      apiValidated: true,
       customerId: customerId,
       facilityId: facilityId,
-      facilitiesCount: facilitiesData._embedded?.facilities?.length || 0,
-      testEndpoint: 'facilities',
+      note: 'OAuth 2.0 token obtained successfully. API endpoints will be called as needed on each page.',
     });
   } catch (error) {
     console.error('Extensiv connection test failed:', error);
