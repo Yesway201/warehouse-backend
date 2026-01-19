@@ -127,6 +127,7 @@ router.post('/test-connection', async (req, res) => {
  * POST /api/extensiv/sync-items
  * Sync items from Extensiv with pagination
  * Backend handles all Extensiv API calls
+ * Updated: pgsiz=100 (Extensiv limit for this endpoint/account)
  */
 router.post('/sync-items', async (req, res) => {
   // FIRST THING: Log that handler started
@@ -215,14 +216,14 @@ router.post('/sync-items', async (req, res) => {
     const accessToken = authResult.token;
     console.log('[Backend] ✅ OAuth token obtained');
 
-    // Step 2: Fetch items with pagination
+    // Step 2: Fetch items with pagination (pgsiz=100 per Extensiv limit)
     console.log('[Backend] STEP 2: Fetching items from Extensiv...');
     const allItems = [];
     let currentPage = 1;
-    const pageSize = 500;
+    const pageSize = 100; // Changed from 500 to 100 per Extensiv requirement
     let hasMorePages = true;
 
-    while (hasMorePages && currentPage <= 10) { // Safety limit: max 10 pages
+    while (hasMorePages && currentPage <= 50) { // Increased max pages from 10 to 50 since pageSize is smaller
       const endpoint = `${EXTENSIV_BASE_URL}/customers/${customerId}/items?pgsiz=${pageSize}&pgnum=${currentPage}`;
       
       console.log(`[Backend] Fetching page ${currentPage}...`);
