@@ -1,10 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import smartsheetRoutes from './routes/smartsheet.js';
 import extensivRoutes from './routes/extensiv.js';
-import credentialsRoutes from './routes/credentials.js';
-import itemsRoutes from './routes/items.js';
 
 dotenv.config();
 
@@ -26,14 +23,11 @@ app.use(express.json());
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Backend API server is running' });
+  res.json({ status: 'ok', message: 'Atoms Backend API server is running' });
 });
 
-// API Routes
-app.use('/api/smartsheet', smartsheetRoutes);
+// API Routes - Only Extensiv (no Supabase dependencies)
 app.use('/api/extensiv', extensivRoutes);
-app.use('/api/credentials', credentialsRoutes);
-app.use('/api/items', itemsRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -45,7 +39,8 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Backend API server running on http://localhost:${PORT}`);
+  console.log(`🚀 Atoms Backend API server running on http://localhost:${PORT}`);
   console.log(`📡 CORS enabled for all origins (App Viewer compatible)`);
   console.log(`✅ Preflight OPTIONS requests handled`);
+  console.log(`✅ NO Supabase - Using Atoms internal managed services only`);
 });
