@@ -4,9 +4,20 @@ const router = express.Router();
 const EXTENSIV_BASE_URL = 'https://secure-wms.com';
 const EXTENSIV_AUTH_URL = `${EXTENSIV_BASE_URL}/AuthServer/api/Token`;
 
+// ⚠️ DO NOT MODIFY — WORKING EXTENSIV INTEGRATION BASELINE
+// This configuration is CONFIRMED WORKING as of commit: stable-extensiv-items-working
+// - OAuth 2.0 token flow: WORKING
+// - Items endpoint: /customers/{customerId}/items?pgsiz=100&pgnum={page}
+// - NO detail parameter (causes QueryParameterException)
+// - pgsiz MAX = 100 (Extensiv enforced limit)
+// - Parsing: data.ResourceList with _embedded fallback
+// - Tested: 38 items syncing successfully for customer ID 208
+const EXTENSIV_ITEMS_API_VERSION = 'v1-stable';
+
 /**
  * Get OAuth 2.0 access token from Extensiv
  * Server-side only - no CORS issues
+ * ⚠️ DO NOT MODIFY — WORKING BASELINE
  */
 async function getAccessToken(credentials) {
   const { clientId, clientSecret, userLoginId } = credentials;
@@ -65,6 +76,7 @@ async function getAccessToken(credentials) {
 /**
  * POST /api/extensiv/test-connection
  * Test OAuth connection only - no business data
+ * ⚠️ DO NOT MODIFY — WORKING BASELINE
  */
 router.post('/test-connection', async (req, res) => {
   console.log('[Backend] ========================================');
@@ -127,22 +139,33 @@ router.post('/test-connection', async (req, res) => {
  * POST /api/extensiv/sync-items
  * Sync items from Extensiv with pagination
  * 
- * CRITICAL: Extensiv API Requirements
+ * ⚠️ DO NOT MODIFY — WORKING EXTENSIV INTEGRATION BASELINE
+ * API Version: v1-stable
+ * 
+ * CRITICAL: Extensiv API Requirements (CONFIRMED WORKING)
+ * - Endpoint: /customers/{customerId}/items?pgsiz=100&pgnum={page}
  * - Max pgsiz = 100 (enforced by Extensiv)
  * - NO detail parameter supported (causes QueryParameterException)
  * - Items returned in HAL format with ResourceList or _embedded
+ * - Authorization: Bearer token (from getAccessToken)
+ * - Accept: application/hal+json
  * 
  * Returns comprehensive diagnostics for troubleshooting
  */
 router.post('/sync-items', async (req, res) => {
   console.log('[Backend] ========================================');
   console.log('[Backend] Handler /api/extensiv/sync-items started at', new Date().toISOString());
+  console.log(`[Backend] API Version: ${EXTENSIV_ITEMS_API_VERSION}`);
   console.log('[Backend] ========================================');
   
   res.setHeader('Content-Type', 'application/json');
   
+  const syncStartTime = new Date().toISOString();
+  
   // Initialize diagnostics object
   const diagnostics = {
+    apiVersion: EXTENSIV_ITEMS_API_VERSION,
+    syncStartTime,
     customerId: null,
     request: {
       urlTemplate: `${EXTENSIV_BASE_URL}/customers/{customerId}/items?pgsiz=100&pgnum={page}`,
@@ -164,6 +187,7 @@ router.post('/sync-items', async (req, res) => {
       updated: 0,
       finalTotalForCustomer: 0,
     },
+    syncEndTime: null,
   };
   
   try {
@@ -210,7 +234,9 @@ router.post('/sync-items', async (req, res) => {
     console.log('[Backend] ✅ OAuth token obtained');
 
     // Step 2: Fetch items with pagination
-    // CRITICAL: pgsiz=100 max, NO detail parameter
+    // ⚠️ DO NOT MODIFY — CONFIRMED WORKING CONFIGURATION
+    // - pgsiz=100 max (Extensiv enforced)
+    // - NO detail parameter (causes QueryParameterException)
     console.log('[Backend] STEP 2: Fetching items from Extensiv...');
     console.log('[Backend] ⚠️  Using pgsiz=100 (Extensiv max), NO detail parameter');
     
@@ -293,7 +319,8 @@ router.post('/sync-items', async (req, res) => {
           console.log(`[Backend] TotalResults reported by Extensiv: ${data.TotalResults}`);
         }
         
-        // IMPROVED PARSING LOGIC per user requirements
+        // ⚠️ DO NOT MODIFY — CONFIRMED WORKING PARSING LOGIC
+        // Priority-based parsing for HAL format responses
         let pageItems = [];
         let detectedPath = 'none';
         
@@ -386,6 +413,8 @@ router.post('/sync-items', async (req, res) => {
       diagnostics.storage.finalTotalForCustomer = allItems.length;
     }
 
+    diagnostics.syncEndTime = new Date().toISOString();
+
     // Step 4: Return items to frontend with full diagnostics
     return res.json({
       success: true,
@@ -397,6 +426,7 @@ router.post('/sync-items', async (req, res) => {
   } catch (error) {
     console.error('[Backend] ❌ UNHANDLED EXCEPTION in sync-items:', error.message);
     console.error('[Backend] Stack trace:', error.stack);
+    diagnostics.syncEndTime = new Date().toISOString();
     return res.status(500).json({
       success: false,
       error: error.message || 'Internal server error',
