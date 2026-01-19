@@ -114,6 +114,7 @@ app.listen(PORT, () => {
   console.log(`   - GET    /api/smartsheet/settings`);
   console.log(`   - POST   /api/smartsheet/settings`);
   console.log(`   - DELETE /api/smartsheet/settings`);
+  console.log(`   - GET    /api/smartsheet/columns`);
   console.log(`   - POST   /api/smartsheet/test-connection`);
   console.log(`   - POST   /api/smartsheet/sync-deliveries`);
   console.log(`   - POST   /api/smartsheet/update-delivery`);
