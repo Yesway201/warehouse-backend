@@ -168,6 +168,69 @@ router.post('/test-connection', async (req, res) => {
 });
 
 /**
+ * GET /api/smartsheet/columns
+ * Fetch all column names from the configured Smartsheet
+ */
+router.get('/columns', async (req, res) => {
+  console.log('[Smartsheet] GET /columns');
+  try {
+    // Load credentials from server-side storage
+    const settings = loadSettings();
+
+    if (!settings.apiToken || !settings.sheetId) {
+      return res.json({
+        success: false,
+        error: 'Smartsheet credentials not configured on server',
+        status: 'NOT_CONFIGURED'
+      });
+    }
+
+    // Fetch sheet metadata to get columns
+    const response = await fetch(`https://api.smartsheet.com/2.0/sheets/${settings.sheetId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${settings.apiToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.json({
+        success: false,
+        error: `Smartsheet API error: ${response.status} ${response.statusText}`,
+        status: response.status,
+        details: errorText
+      });
+    }
+
+    const sheetData = await response.json();
+
+    // Extract column names
+    const columns = sheetData.columns.map(col => ({
+      id: col.id,
+      title: col.title,
+      type: col.type,
+      primary: col.primary || false
+    }));
+
+    return res.json({
+      success: true,
+      columns,
+      sheetName: sheetData.name
+    });
+  } catch (error) {
+    console.error('[Smartsheet] Get columns error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      status: 'SERVER_ERROR',
+      details: String(error)
+    });
+  }
+});
+
+/**
  * POST /api/smartsheet/sync-deliveries
  * Sync deliveries from Smartsheet using server-side stored credentials
  */
@@ -425,6 +488,7 @@ router.all('*', (req, res) => {
       'POST /api/smartsheet/settings',
       'DELETE /api/smartsheet/settings',
       'POST /api/smartsheet/test-connection',
+      'GET /api/smartsheet/columns',
       'POST /api/smartsheet/sync-deliveries',
       'POST /api/smartsheet/update-delivery'
     ]
