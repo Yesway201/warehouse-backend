@@ -128,7 +128,6 @@ router.post('/test-connection', async (req, res) => {
  * Sync items from Extensiv with pagination
  * Backend handles all Extensiv API calls
  * Updated: pgsiz=100 (Extensiv limit for this endpoint/account)
- * FIXED: Added detail=All to get full item data instead of metadata only
  * Returns comprehensive diagnostics for troubleshooting
  */
 router.post('/sync-items', async (req, res) => {
@@ -144,7 +143,7 @@ router.post('/sync-items', async (req, res) => {
   const diagnostics = {
     customerId: null,
     request: {
-      urlTemplate: `${EXTENSIV_BASE_URL}/customers/{customerId}/items?detail=All`,
+      urlTemplate: `${EXTENSIV_BASE_URL}/customers/{customerId}/items`,
       pgsiz: 100,
       pagesRequested: [],
       lastUrlCalled: null,
@@ -249,16 +248,14 @@ router.post('/sync-items', async (req, res) => {
     console.log('[Backend] ✅ OAuth token obtained');
 
     // Step 2: Fetch items with pagination (pgsiz=100 per Extensiv limit)
-    // CRITICAL FIX: Added detail=All to get full item data instead of metadata only
     console.log('[Backend] STEP 2: Fetching items from Extensiv...');
-    console.log('[Backend] ⚠️  IMPORTANT: Using detail=All to get full item data');
     const allItems = [];
     let currentPage = 1;
     const pageSize = 100;
     let hasMorePages = true;
 
     while (hasMorePages && currentPage <= 50) {
-      const endpoint = `${EXTENSIV_BASE_URL}/customers/${customerId}/items?pgsiz=${pageSize}&pgnum=${currentPage}&detail=All`;
+      const endpoint = `${EXTENSIV_BASE_URL}/customers/${customerId}/items?pgsiz=${pageSize}&pgnum=${currentPage}`;
       diagnostics.request.pagesRequested.push(currentPage);
       diagnostics.request.lastUrlCalled = endpoint;
       
