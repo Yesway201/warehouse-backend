@@ -126,24 +126,26 @@ router.post('/test-connection', async (req, res) => {
 /**
  * POST /api/extensiv/sync-items
  * Sync items from Extensiv with pagination
- * Backend handles all Extensiv API calls
- * Updated: pgsiz=100 (Extensiv limit for this endpoint/account)
+ * 
+ * CRITICAL: Extensiv API Requirements
+ * - Max pgsiz = 100 (enforced by Extensiv)
+ * - NO detail parameter supported (causes QueryParameterException)
+ * - Items returned in HAL format with ResourceList or _embedded
+ * 
  * Returns comprehensive diagnostics for troubleshooting
  */
 router.post('/sync-items', async (req, res) => {
-  // FIRST THING: Log that handler started
   console.log('[Backend] ========================================');
   console.log('[Backend] Handler /api/extensiv/sync-items started at', new Date().toISOString());
   console.log('[Backend] ========================================');
   
-  // SECOND THING: Set JSON content type
   res.setHeader('Content-Type', 'application/json');
   
   // Initialize diagnostics object
   const diagnostics = {
     customerId: null,
     request: {
-      urlTemplate: `${EXTENSIV_BASE_URL}/customers/{customerId}/items`,
+      urlTemplate: `${EXTENSIV_BASE_URL}/customers/{customerId}/items?pgsiz=100&pgnum={page}`,
       pgsiz: 100,
       pagesRequested: [],
       lastUrlCalled: null,
@@ -152,6 +154,7 @@ router.post('/sync-items', async (req, res) => {
       httpStatusByPage: [],
       rawSnippetByPage: [],
       detectedItemsPath: 'none',
+      totalResultsReported: null,
       itemsFoundByPage: [],
       totalItemsExtracted: 0,
     },
@@ -163,63 +166,23 @@ router.post('/sync-items', async (req, res) => {
     },
   };
   
-  // THIRD THING: Wrap EVERYTHING in try-catch
   try {
-    // Log incoming request immediately
     console.log('[Backend] Full request body:', JSON.stringify(req.body, null, 2));
     
     const { clientId, clientSecret, userLoginId, customerId } = req.body;
     diagnostics.customerId = customerId;
 
-    // Log credential presence
     console.log('[Backend] Credentials check:');
     console.log('[Backend] - clientId present:', !!clientId);
     console.log('[Backend] - clientSecret present:', !!clientSecret);
     console.log('[Backend] - userLoginId present:', !!userLoginId);
-    console.log('[Backend] - userLoginId value:', userLoginId || 'MISSING');
     console.log('[Backend] - customerId present:', !!customerId);
-    console.log('[Backend] - customerId value (full):', JSON.stringify(customerId));
-    console.log('[Backend] - customerId type:', typeof customerId);
 
-    // Early validation with detailed error
-    if (!clientId) {
-      console.error('[Backend] Missing clientId');
+    if (!clientId || !clientSecret || !userLoginId || !customerId) {
+      console.error('[Backend] Missing required fields');
       return res.status(400).json({
         success: false,
-        error: 'Missing required field: clientId',
-        step: 'credentials',
-        status: 400,
-        diagnostics,
-      });
-    }
-    
-    if (!clientSecret) {
-      console.error('[Backend] Missing clientSecret');
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: clientSecret',
-        step: 'credentials',
-        status: 400,
-        diagnostics,
-      });
-    }
-    
-    if (!userLoginId) {
-      console.error('[Backend] Missing userLoginId');
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: userLoginId',
-        step: 'credentials',
-        status: 400,
-        diagnostics,
-      });
-    }
-    
-    if (!customerId) {
-      console.error('[Backend] Missing customerId');
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: customerId',
+        error: 'Missing required fields: clientId, clientSecret, userLoginId, customerId',
         step: 'validation',
         status: 400,
         diagnostics,
@@ -239,7 +202,6 @@ router.post('/sync-items', async (req, res) => {
         error: authResult.error,
         step: 'token',
         status: 401,
-        details: 'Failed to obtain OAuth token from Extensiv',
         diagnostics,
       });
     }
@@ -247,8 +209,11 @@ router.post('/sync-items', async (req, res) => {
     const accessToken = authResult.token;
     console.log('[Backend] ✅ OAuth token obtained');
 
-    // Step 2: Fetch items with pagination (pgsiz=100 per Extensiv limit)
+    // Step 2: Fetch items with pagination
+    // CRITICAL: pgsiz=100 max, NO detail parameter
     console.log('[Backend] STEP 2: Fetching items from Extensiv...');
+    console.log('[Backend] ⚠️  Using pgsiz=100 (Extensiv max), NO detail parameter');
+    
     const allItems = [];
     let currentPage = 1;
     const pageSize = 100;
@@ -267,8 +232,8 @@ router.post('/sync-items', async (req, res) => {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/hal+json',
             'Accept': 'application/hal+json',
+            'Content-Type': 'application/hal+json',
           },
         });
 
@@ -278,9 +243,8 @@ router.post('/sync-items', async (req, res) => {
         if (!response.ok) {
           const errorText = await response.text();
           console.error(`[Backend] Failed to fetch page ${currentPage}:`, response.status);
-          console.error(`[Backend] Error response (first 1000 chars):`, errorText.substring(0, 1000));
+          console.error(`[Backend] Error response:`, errorText.substring(0, 1000));
           
-          // Store error snippet (sanitized)
           diagnostics.response.rawSnippetByPage.push({
             page: currentPage,
             snippet: errorText.substring(0, 300),
@@ -300,8 +264,7 @@ router.post('/sync-items', async (req, res) => {
         const responseText = await response.text();
         console.log(`[Backend] Page ${currentPage} raw response (first 1000 chars):`, responseText.substring(0, 1000));
         
-        // Store sanitized snippet (no tokens)
-        const sanitizedSnippet = responseText.substring(0, 300).replace(/Bearer\s+[\w-]+/gi, 'Bearer [REDACTED]');
+        const sanitizedSnippet = responseText.substring(0, 500).replace(/Bearer\s+[\w-]+/gi, 'Bearer [REDACTED]');
         diagnostics.response.rawSnippetByPage.push({
           page: currentPage,
           snippet: sanitizedSnippet,
@@ -322,47 +285,64 @@ router.post('/sync-items', async (req, res) => {
           });
         }
 
-        console.log(`[Backend] Page ${currentPage} response structure:`, Object.keys(data));
+        console.log(`[Backend] Page ${currentPage} response keys:`, Object.keys(data));
         
-        // Extract items from response (handle different response formats)
+        // Store TotalResults if present
+        if (data.TotalResults !== undefined && diagnostics.response.totalResultsReported === null) {
+          diagnostics.response.totalResultsReported = data.TotalResults;
+          console.log(`[Backend] TotalResults reported by Extensiv: ${data.TotalResults}`);
+        }
+        
+        // IMPROVED PARSING LOGIC per user requirements
         let pageItems = [];
         let detectedPath = 'none';
         
-        if (data.ResourceList) {
+        // Priority 1: Check ResourceList (most common for Extensiv)
+        if (Array.isArray(data?.ResourceList)) {
           pageItems = data.ResourceList;
           detectedPath = 'ResourceList';
-          console.log(`[Backend] Found items in data.ResourceList`);
-        } else if (data.items) {
+          console.log(`[Backend] ✅ Found ${pageItems.length} items in data.ResourceList`);
+        }
+        // Priority 2: Check _embedded (HAL format)
+        else if (data?._embedded) {
+          const embeddedArrays = Object.values(data._embedded);
+          const found = embeddedArrays.find(v => Array.isArray(v));
+          if (found) {
+            pageItems = found;
+            detectedPath = `_embedded (found array with ${found.length} items)`;
+            console.log(`[Backend] ✅ Found ${pageItems.length} items in data._embedded`);
+          }
+        }
+        // Priority 3: Check if response itself is an array
+        else if (Array.isArray(data)) {
+          pageItems = data;
+          detectedPath = 'root array';
+          console.log(`[Backend] ✅ Response is array with ${pageItems.length} items`);
+        }
+        // Priority 4: Check legacy 'items' property
+        else if (Array.isArray(data?.items)) {
           pageItems = data.items;
           detectedPath = 'items';
-          console.log(`[Backend] Found items in data.items`);
-        } else if (data._embedded) {
-          const embedded = data._embedded;
-          pageItems = embedded['http://api.3plCentral.com/rels/customers/items'] || 
-                      embedded.items || 
-                      [];
-          detectedPath = '_embedded[http://api.3plCentral.com/rels/customers/items] or _embedded.items';
-          console.log(`[Backend] Found items in data._embedded`);
-        } else if (Array.isArray(data)) {
-          pageItems = data;
-          detectedPath = 'array';
-          console.log(`[Backend] Response is array`);
-        } else {
+          console.log(`[Backend] ✅ Found ${pageItems.length} items in data.items`);
+        }
+        else {
           detectedPath = `unknown (keys: ${Object.keys(data).join(', ')})`;
-          console.log(`[Backend] Unknown response structure, keys:`, Object.keys(data));
+          console.log(`[Backend] ⚠️  No items found. Response structure:`, Object.keys(data));
+          console.log(`[Backend] ⚠️  Full response (first 2000 chars):`, JSON.stringify(data).substring(0, 2000));
         }
 
         // Update detected path (only once)
-        if (diagnostics.response.detectedItemsPath === 'none') {
+        if (diagnostics.response.detectedItemsPath === 'none' && detectedPath !== 'none') {
           diagnostics.response.detectedItemsPath = detectedPath;
         }
 
         console.log(`[Backend] Page ${currentPage}: ${pageItems.length} items extracted`);
         diagnostics.response.itemsFoundByPage.push({ page: currentPage, count: pageItems.length });
         
+        // Pagination logic: continue until items < pageSize
         if (pageItems.length === 0) {
           hasMorePages = false;
-          console.log(`[Backend] No more items, stopping pagination`);
+          console.log(`[Backend] No items on page ${currentPage}, stopping pagination`);
         } else {
           allItems.push(...pageItems);
           
@@ -371,7 +351,7 @@ router.post('/sync-items', async (req, res) => {
             console.log(`[Backend] Last page (${pageItems.length} < ${pageSize}), stopping`);
           } else {
             currentPage++;
-            console.log(`[Backend] More pages available, continuing to page ${currentPage}`);
+            console.log(`[Backend] Full page received, continuing to page ${currentPage}`);
           }
         }
       } catch (fetchError) {
@@ -390,21 +370,17 @@ router.post('/sync-items', async (req, res) => {
 
     diagnostics.response.totalItemsExtracted = allItems.length;
     console.log(`[Backend] ✅ Fetched ${allItems.length} total items across ${currentPage - 1} pages`);
-
-    // Step 3: Store items in localStorage (simulated storage for diagnostics)
-    // In real implementation, this would be database operations
-    const sessionId = 'warehouse_mgmt';
-    const tableName = 'extensiv_items';
-    const storageKey = `${sessionId}_${tableName}`;
     
-    // For diagnostics, we'll track what would be inserted/updated
+    if (diagnostics.response.totalResultsReported !== null) {
+      console.log(`[Backend] 📊 Extensiv reported ${diagnostics.response.totalResultsReported} total, extracted ${allItems.length}`);
+    }
+
+    // Step 3: Simulate storage for diagnostics
     let inserted = 0;
     let updated = 0;
     
-    // Simulate storage logic
     if (allItems.length > 0) {
-      // All items would be new or updated
-      inserted = allItems.length; // Simplified: assume all are new
+      inserted = allItems.length;
       diagnostics.storage.inserted = inserted;
       diagnostics.storage.updated = updated;
       diagnostics.storage.finalTotalForCustomer = allItems.length;
