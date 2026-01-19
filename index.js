@@ -1,3 +1,8 @@
+// ⚠️ DO NOT MODIFY – Smartsheet stable working configuration
+// This file is part of the STABLE BASELINE (smartsheet-stable-v1.0)
+// Any changes may break the working Smartsheet integration
+// See: server/SMARTSHEET_BASELINE.md for details
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -10,6 +15,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware - Allow all origins for App Viewer compatibility
+// ⚠️ STABLE CORS CONFIG - DO NOT MODIFY
 app.use(cors({
   origin: '*',
   credentials: false,
@@ -75,6 +81,7 @@ app.get('/api/debug/routes', (req, res) => {
 });
 
 // API Routes - EXACT MOUNT PATHS
+// ⚠️ STABLE ROUTE MOUNTING - DO NOT MODIFY ORDER OR PATHS
 console.log('[Server] Mounting /api/extensiv routes...');
 app.use('/api/extensiv', extensivRoutes);
 
@@ -118,4 +125,5 @@ app.listen(PORT, () => {
   console.log(`   - POST   /api/smartsheet/test-connection`);
   console.log(`   - POST   /api/smartsheet/sync-deliveries`);
   console.log(`   - POST   /api/smartsheet/update-delivery`);
+  console.log(`⚠️  STABLE BASELINE LOCKED - See SMARTSHEET_BASELINE.md`);
 });

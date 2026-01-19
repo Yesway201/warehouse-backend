@@ -1,3 +1,8 @@
+// ⚠️ DO NOT MODIFY – Smartsheet stable working configuration
+// This file is part of the STABLE BASELINE (smartsheet-stable-v1.0)
+// Any changes may break the working Smartsheet integration
+// See: server/SMARTSHEET_BASELINE.md for details
+
 // Smartsheet API integration routes with server-side persistent storage
 import express from 'express';
 import fetch from 'node-fetch';
@@ -11,6 +16,7 @@ console.log('[SmartsheetRoutes] mounted');
 /**
  * GET /api/smartsheet/settings
  * Load Smartsheet settings from server-side storage
+ * ⚠️ STABLE ENDPOINT - DO NOT MODIFY
  */
 router.get('/settings', async (req, res) => {
   console.log('[Smartsheet] GET /settings');
@@ -40,6 +46,7 @@ router.get('/settings', async (req, res) => {
 /**
  * POST /api/smartsheet/settings
  * Save Smartsheet settings to server-side storage
+ * ⚠️ STABLE ENDPOINT - DO NOT MODIFY
  */
 router.post('/settings', async (req, res) => {
   console.log('[Smartsheet] POST /settings');
@@ -84,6 +91,7 @@ router.post('/settings', async (req, res) => {
 /**
  * DELETE /api/smartsheet/settings
  * Clear Smartsheet settings from server-side storage
+ * ⚠️ STABLE ENDPOINT - DO NOT MODIFY
  */
 router.delete('/settings', async (req, res) => {
   console.log('[Smartsheet] DELETE /settings');
@@ -114,6 +122,7 @@ router.delete('/settings', async (req, res) => {
 /**
  * POST /api/smartsheet/test-connection
  * Test Smartsheet connection using server-side stored credentials
+ * ⚠️ STABLE ENDPOINT - DO NOT MODIFY
  */
 router.post('/test-connection', async (req, res) => {
   console.log('[Smartsheet] POST /test-connection');
@@ -170,6 +179,7 @@ router.post('/test-connection', async (req, res) => {
 /**
  * GET /api/smartsheet/columns
  * Fetch all column names from the configured Smartsheet
+ * ⚠️ STABLE ENDPOINT - DO NOT MODIFY
  */
 router.get('/columns', async (req, res) => {
   console.log('[Smartsheet] GET /columns');
@@ -233,6 +243,7 @@ router.get('/columns', async (req, res) => {
 /**
  * POST /api/smartsheet/sync-deliveries
  * Sync deliveries from Smartsheet using server-side stored credentials
+ * ⚠️ STABLE ENDPOINT - DO NOT MODIFY
  */
 router.post('/sync-deliveries', async (req, res) => {
   console.log('[Smartsheet] POST /sync-deliveries');
@@ -347,6 +358,7 @@ router.post('/sync-deliveries', async (req, res) => {
 /**
  * POST /api/smartsheet/update-delivery
  * Update a delivery in Smartsheet using server-side stored credentials
+ * ⚠️ STABLE ENDPOINT - DO NOT MODIFY
  */
 router.post('/update-delivery', async (req, res) => {
   console.log('[Smartsheet] POST /update-delivery');
