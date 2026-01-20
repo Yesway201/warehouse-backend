@@ -13,6 +13,26 @@ const router = express.Router();
 // Boot log to confirm routes are loaded
 console.log('[SmartsheetRoutes] mounted');
 
+// API Version for tracking deployment
+const API_VERSION = 'incoming-filter-v2-2026-01-20';
+const BACKEND_COMMIT = process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown';
+
+/**
+ * Helper: Normalize and trim string values
+ */
+function normalizeString(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+/**
+ * Helper: Check if a value is blank (null, undefined, empty string, or whitespace)
+ */
+function isBlank(value) {
+  const normalized = normalizeString(value);
+  return normalized === '';
+}
+
 /**
  * GET /api/smartsheet/settings
  * Load Smartsheet settings from server-side storage
@@ -243,10 +263,34 @@ router.get('/columns', async (req, res) => {
 /**
  * POST /api/smartsheet/sync-deliveries
  * Sync deliveries from Smartsheet using server-side stored credentials
- * ⚠️ STABLE ENDPOINT - DO NOT MODIFY
+ * 
+ * ═══════════════════════════════════════════════════════════════════════
+ * API VERSION: incoming-filter-v2-2026-01-20
+ * ═══════════════════════════════════════════════════════════════════════
+ * 
+ * EXACT COLUMN TITLES (NO OLD MAPPINGS):
+ * - Customer Name
+ * - PO # / Container #
+ * - Status
+ * - Done
+ * 
+ * FILTERING RULES (ALL must be true to INCLUDE):
+ * 1) Customer Name is NOT blank (trim whitespace)
+ * 2) PO # / Container # is NOT blank (trim whitespace)
+ * 3) Done is NOT checked
+ * 4) Status: blank → "Expected" OR exactly one of: Arrived, Dropped, Unloaded, Checked In
+ * 
+ * FIELD MAPPING:
+ * - "PO # / Container #" → poContainerNumber (primary)
+ * - poNumber = poContainerNumber (legacy)
+ * - containerNumber = poContainerNumber (legacy)
+ * 
+ * ═══════════════════════════════════════════════════════════════════════
  */
 router.post('/sync-deliveries', async (req, res) => {
-  console.log('[Smartsheet] POST /sync-deliveries');
+  console.log(`[Smartsheet] POST /sync-deliveries - API VERSION: ${API_VERSION}`);
+  const syncTimestamp = new Date().toISOString();
+  
   try {
     // Load credentials from server-side storage
     const settings = loadSettings();
@@ -254,7 +298,9 @@ router.post('/sync-deliveries', async (req, res) => {
     if (!settings.apiToken || !settings.sheetId) {
       return res.json({
         success: false,
-        error: 'Smartsheet credentials not configured on server'
+        error: 'Smartsheet credentials not configured on server',
+        apiVersion: API_VERSION,
+        backendCommit: BACKEND_COMMIT
       });
     }
 
@@ -272,77 +318,213 @@ router.post('/sync-deliveries', async (req, res) => {
       return res.json({
         success: false,
         error: `Smartsheet API error: ${response.status} ${response.statusText}`,
+        apiVersion: API_VERSION,
+        backendCommit: BACKEND_COMMIT,
         diagnostics: { rawResponse: errorText }
       });
     }
 
     const sheetData = await response.json();
 
-    // Build column mapping (Smartsheet column name -> column ID)
+    // ═══════════════════════════════════════════════════════════════════════
+    // EXACT COLUMN TITLE MATCHING (NO OLD MAPPINGS)
+    // ═══════════════════════════════════════════════════════════════════════
     const columnMap = {};
     sheetData.columns.forEach(col => {
       columnMap[col.title] = col.id;
     });
 
-    // Create reverse mapping (appField -> Smartsheet column ID)
-    const fieldToColumnId = {};
-    settings.mappings.forEach(mapping => {
-      const columnId = columnMap[mapping.smartsheetColumn];
-      if (columnId) {
-        fieldToColumnId[mapping.appField] = columnId;
-      }
-    });
+    const USING_COLUMNS = ['Customer Name', 'PO # / Container #', 'Status', 'Done'];
+    
+    const customerNameColumnId = columnMap['Customer Name'];
+    const poContainerColumnId = columnMap['PO # / Container #'];
+    const statusColumnId = columnMap['Status'];
+    const doneColumnId = columnMap['Done'];
 
-    // Process rows and filter by "Done" checkbox
+    console.log(`[Smartsheet] API Version: ${API_VERSION}`);
+    console.log(`[Smartsheet] Backend Commit: ${BACKEND_COMMIT}`);
+    console.log('[Smartsheet] Using EXACT Column Titles:');
+    console.log(`  Customer Name: ${customerNameColumnId}`);
+    console.log(`  PO # / Container #: ${poContainerColumnId}`);
+    console.log(`  Status: ${statusColumnId}`);
+    console.log(`  Done: ${doneColumnId}`);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ALLOWED STATUS VALUES (EXACT MATCH AFTER TRIM)
+    // ═══════════════════════════════════════════════════════════════════════
+    const ALLOWED_STATUSES = ['Arrived', 'Dropped', 'Unloaded', 'Checked In'];
+    console.log('[Smartsheet] Allowed Statuses:', ALLOWED_STATUSES);
+
+    // Filtering counters
+    let totalRows = sheetData.rows.length;
+    let skipped_missing_customer = 0;
+    let skipped_missing_poContainer = 0;
+    let skipped_done = 0;
+    let skipped_status_not_allowed = 0;
+    let includedRows = 0;
+
+    // Audit logs
+    const first10Processed = [];
+
+    // Process rows
     const deliveries = [];
-    const doneColumnId = fieldToColumnId['done'];
 
-    sheetData.rows.forEach(row => {
-      // Check if "Done" is checked (skip if true)
+    sheetData.rows.forEach((row, index) => {
+      // ═══════════════════════════════════════════════════════════════════════
+      // EXTRACT RAW VALUES FROM EXACT COLUMNS
+      // ═══════════════════════════════════════════════════════════════════════
+      const customerNameCell = row.cells.find(c => c.columnId === customerNameColumnId);
+      const customerNameRaw = normalizeString(customerNameCell?.displayValue || customerNameCell?.value);
+
+      const poContainerCell = row.cells.find(c => c.columnId === poContainerColumnId);
+      const poContainerRaw = normalizeString(poContainerCell?.displayValue || poContainerCell?.value);
+
+      const statusCell = row.cells.find(c => c.columnId === statusColumnId);
+      const statusRaw = normalizeString(statusCell?.displayValue || statusCell?.value);
+
       const doneCell = row.cells.find(c => c.columnId === doneColumnId);
-      const isDone = doneCell?.value === true;
+      const doneRaw = doneCell?.value === true;
 
-      if (isDone) {
-        return; // Skip this row
+      // ═══════════════════════════════════════════════════════════════════════
+      // FILTERING LOGIC (BACKEND SOURCE OF TRUTH)
+      // ═══════════════════════════════════════════════════════════════════════
+      let decision = 'INCLUDED';
+      let reason = '';
+      let statusFinal = '';
+
+      // Rule 1: Customer Name must NOT be blank
+      if (isBlank(customerNameRaw)) {
+        decision = 'SKIPPED';
+        reason = 'Customer Name is blank';
+        skipped_missing_customer++;
+      }
+      // Rule 2: PO # / Container # must NOT be blank
+      else if (isBlank(poContainerRaw)) {
+        decision = 'SKIPPED';
+        reason = 'PO # / Container # is blank';
+        skipped_missing_poContainer++;
+      }
+      // Rule 3: Done must NOT be checked
+      else if (doneRaw) {
+        decision = 'SKIPPED';
+        reason = 'Done checkbox is checked';
+        skipped_done++;
+      }
+      // Rule 4: Status handling
+      else {
+        if (isBlank(statusRaw)) {
+          // Blank status is VALID → set to "Expected"
+          statusFinal = 'Expected';
+        } else if (ALLOWED_STATUSES.includes(statusRaw)) {
+          // Status matches allowed list
+          statusFinal = statusRaw;
+        } else {
+          // Status not allowed
+          decision = 'SKIPPED';
+          reason = `Status "${statusRaw}" not in allowed list [${ALLOWED_STATUSES.join(', ')}]`;
+          skipped_status_not_allowed++;
+        }
       }
 
-      // Extract delivery data based on column mappings
+      // ═══════════════════════════════════════════════════════════════════════
+      // AUDIT LOGGING (FIRST 10 ROWS)
+      // ═══════════════════════════════════════════════════════════════════════
+      if (index < 10) {
+        first10Processed.push({
+          rowId: String(row.id),
+          customerNameRaw: customerNameRaw || '(blank)',
+          poContainerRaw: poContainerRaw || '(blank)',
+          statusRaw: statusRaw || '(blank)',
+          statusFinal: statusFinal || '(not set)',
+          doneRaw,
+          decision,
+          reason: reason || 'Passed all checks'
+        });
+      }
+
+      // If skipped, don't add to deliveries
+      if (decision === 'SKIPPED') {
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // CREATE DELIVERY OBJECT (ONLY FOR INCLUDED ROWS)
+      // ═══════════════════════════════════════════════════════════════════════
       const delivery = {
         rowId: String(row.id),
+        smartsheetRowId: String(row.id),
+        customerName: customerNameRaw,
+        poContainerNumber: poContainerRaw,
+        poNumber: poContainerRaw,           // Legacy field (same value)
+        containerNumber: poContainerRaw,    // Legacy field (same value)
+        status: statusFinal,
+        statusRaw: statusRaw || '(blank)',
+        done: doneRaw,
+        // Additional fields for compatibility
+        carrier: '',
+        door: '',
+        ywNumber: '',
+        threePlNumber: '',
+        expectedDeliveryDate: '',
+        trackingNumber: '',
+        referenceNumber: '',
+        extensivReceiptId: ''
       };
 
-      // Map each field
-      Object.keys(fieldToColumnId).forEach(appField => {
-        const columnId = fieldToColumnId[appField];
-        const cell = row.cells.find(c => c.columnId === columnId);
-        
-        if (cell) {
-          if (appField === 'done') {
-            delivery[appField] = cell.value === true;
-          } else if (appField === 'expectedDeliveryDate') {
-            delivery[appField] = cell.value || '';
-          } else {
-            delivery[appField] = cell.displayValue || cell.value || '';
-          }
-        } else {
-          delivery[appField] = appField === 'done' ? false : '';
-        }
-      });
-
       deliveries.push(delivery);
+      includedRows++;
     });
+
+    const skippedRows = totalRows - includedRows;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DELIVERIES SAMPLE (FROM INCLUDED DELIVERIES ONLY - AFTER FILTERING)
+    // ═══════════════════════════════════════════════════════════════════════
+    const deliveriesSample = deliveries.slice(0, 5).map(d => ({
+      rowId: d.rowId,
+      customerName: d.customerName,
+      poContainerNumber: d.poContainerNumber,
+      status: d.status,
+      statusRaw: d.statusRaw
+    }));
+
+    // Log summary
+    console.log('[Smartsheet] ═══════════════════════════════════════════════');
+    console.log(`[Smartsheet] API VERSION: ${API_VERSION}`);
+    console.log(`[Smartsheet] BACKEND COMMIT: ${BACKEND_COMMIT}`);
+    console.log('[Smartsheet] ═══════════════════════════════════════════════');
+    console.log(`[Smartsheet] Sheet ID: ${settings.sheetId}`);
+    console.log(`[Smartsheet] Total rows: ${totalRows}`);
+    console.log(`[Smartsheet] Included: ${includedRows}`);
+    console.log(`[Smartsheet] Skipped: ${skippedRows}`);
+    console.log(`[Smartsheet]   - Missing customer: ${skipped_missing_customer}`);
+    console.log(`[Smartsheet]   - Missing PO/Container: ${skipped_missing_poContainer}`);
+    console.log(`[Smartsheet]   - Done checked: ${skipped_done}`);
+    console.log(`[Smartsheet]   - Status not allowed: ${skipped_status_not_allowed}`);
+    console.log('[Smartsheet] ═══════════════════════════════════════════════');
 
     return res.json({
       success: true,
-      message: `Synced ${deliveries.length} deliveries`,
+      message: `Synced ${includedRows} deliveries`,
       deliveries,
-      rowsProcessed: sheetData.rows.length,
-      rowsImported: deliveries.length,
+      timestamp: syncTimestamp,
+      apiVersion: API_VERSION,
+      backendCommit: BACKEND_COMMIT,
+      usingColumns: USING_COLUMNS,
       diagnostics: {
         sheetId: settings.sheetId,
-        totalRows: sheetData.rows.length,
-        filteredRows: deliveries.length,
-        columnMappings: settings.mappings
+        totalRows,
+        includedRows,
+        skippedRows,
+        skipReasonsCount: {
+          skipped_missing_customer,
+          skipped_missing_poContainer,
+          skipped_done,
+          skipped_status_not_allowed
+        },
+        first10Processed,
+        deliveriesSample,
+        allowedStatuses: ALLOWED_STATUSES
       }
     });
   } catch (error) {
@@ -350,6 +532,8 @@ router.post('/sync-deliveries', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: error.message,
+      apiVersion: API_VERSION,
+      backendCommit: BACKEND_COMMIT,
       diagnostics: { exception: String(error) }
     });
   }
