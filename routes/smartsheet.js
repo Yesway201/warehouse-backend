@@ -14,7 +14,7 @@ const router = express.Router();
 console.log('[SmartsheetRoutes] mounted');
 
 // API Version for tracking deployment
-const API_VERSION = 'incoming-filter-v2-2026-01-20';
+const API_VERSION = 'incoming-filter-v3-2026-01-21';
 const BACKEND_COMMIT = process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown';
 
 /**
@@ -265,7 +265,7 @@ router.get('/columns', async (req, res) => {
  * Sync deliveries from Smartsheet using server-side stored credentials
  * 
  * ═══════════════════════════════════════════════════════════════════════
- * API VERSION: incoming-filter-v2-2026-01-20
+ * API VERSION: incoming-filter-v3-2026-01-21
  * ═══════════════════════════════════════════════════════════════════════
  * 
  * EXACT COLUMN TITLES (NO OLD MAPPINGS):
@@ -276,9 +276,11 @@ router.get('/columns', async (req, res) => {
  * 
  * FILTERING RULES (ALL must be true to INCLUDE):
  * 1) Customer Name is NOT blank (trim whitespace)
- * 2) PO # / Container # is NOT blank (trim whitespace)
- * 3) Done is NOT checked
- * 4) Status: blank → "Expected" OR exactly one of: Arrived, Dropped, Unloaded, Checked In
+ * 2) Done is NOT checked
+ * 3) Status: blank → "Expected" OR exactly one of: Arrived, Dropped, Unloaded, Checked In
+ * 
+ * REMOVED FILTER:
+ * - PO # / Container # filter removed (can be blank now)
  * 
  * FIELD MAPPING:
  * - "PO # / Container #" → poContainerNumber (primary)
@@ -358,7 +360,6 @@ router.post('/sync-deliveries', async (req, res) => {
     // Filtering counters
     let totalRows = sheetData.rows.length;
     let skipped_missing_customer = 0;
-    let skipped_missing_poContainer = 0;
     let skipped_done = 0;
     let skipped_status_not_allowed = 0;
     let includedRows = 0;
@@ -398,19 +399,13 @@ router.post('/sync-deliveries', async (req, res) => {
         reason = 'Customer Name is blank';
         skipped_missing_customer++;
       }
-      // Rule 2: PO # / Container # must NOT be blank
-      else if (isBlank(poContainerRaw)) {
-        decision = 'SKIPPED';
-        reason = 'PO # / Container # is blank';
-        skipped_missing_poContainer++;
-      }
-      // Rule 3: Done must NOT be checked
+      // Rule 2: Done must NOT be checked
       else if (doneRaw) {
         decision = 'SKIPPED';
         reason = 'Done checkbox is checked';
         skipped_done++;
       }
-      // Rule 4: Status handling
+      // Rule 3: Status handling
       else {
         if (isBlank(statusRaw)) {
           // Blank status is VALID → set to "Expected"
@@ -454,9 +449,9 @@ router.post('/sync-deliveries', async (req, res) => {
         rowId: String(row.id),
         smartsheetRowId: String(row.id),
         customerName: customerNameRaw,
-        poContainerNumber: poContainerRaw,
-        poNumber: poContainerRaw,           // Legacy field (same value)
-        containerNumber: poContainerRaw,    // Legacy field (same value)
+        poContainerNumber: poContainerRaw || '',  // Can be blank now
+        poNumber: poContainerRaw || '',           // Legacy field (same value)
+        containerNumber: poContainerRaw || '',    // Legacy field (same value)
         status: statusFinal,
         statusRaw: statusRaw || '(blank)',
         done: doneRaw,
@@ -498,7 +493,6 @@ router.post('/sync-deliveries', async (req, res) => {
     console.log(`[Smartsheet] Included: ${includedRows}`);
     console.log(`[Smartsheet] Skipped: ${skippedRows}`);
     console.log(`[Smartsheet]   - Missing customer: ${skipped_missing_customer}`);
-    console.log(`[Smartsheet]   - Missing PO/Container: ${skipped_missing_poContainer}`);
     console.log(`[Smartsheet]   - Done checked: ${skipped_done}`);
     console.log(`[Smartsheet]   - Status not allowed: ${skipped_status_not_allowed}`);
     console.log('[Smartsheet] ═══════════════════════════════════════════════');
@@ -518,7 +512,6 @@ router.post('/sync-deliveries', async (req, res) => {
         skippedRows,
         skipReasonsCount: {
           skipped_missing_customer,
-          skipped_missing_poContainer,
           skipped_done,
           skipped_status_not_allowed
         },
