@@ -16,7 +16,7 @@ app.get('/api/version', (req, res) => {
   const storageInfo = getStorageInfo();
   
   res.json({
-    apiVersion: 'incoming-filter-v2-2026-01-20',
+    apiVersion: 'incoming-filter-v3-2026-01-21',
     backendCommit: process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown',
     deployedAt: new Date().toISOString(),
     nodeVersion: process.version,
@@ -37,7 +37,7 @@ app.use('/api/extensiv', extensivRouter);
 app.get('/', (req, res) => {
   res.json({
     message: 'Warehouse Management Backend API',
-    version: 'incoming-filter-v2-2026-01-20',
+    version: 'incoming-filter-v3-2026-01-21',
     endpoints: {
       version: 'GET /api/version',
       health: 'GET /health',
@@ -58,7 +58,7 @@ app.use((req, res) => {
 
 app.listen(PORT, () => {
   console.log(`[Server] Backend running on port ${PORT}`);
-  console.log(`[Server] API Version: incoming-filter-v2-2026-01-20`);
+  console.log(`[Server] API Version: incoming-filter-v3-2026-01-21`);
   console.log(`[Server] Commit: ${process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown'}`);
   console.log(`[Server] Environment: ${process.env.RAILWAY_ENVIRONMENT || 'development'}`);
 });
