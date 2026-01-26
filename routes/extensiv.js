@@ -444,12 +444,12 @@ router.post('/sync-items', async (req, res) => {
  * POST /api/extensiv/send-receiving
  * Create a new receiver in Extensiv with PALLET-LEVEL SPLITTING
  * 
- * NEW: Implements pallet-splitting logic
+ * UPDATED: Uses palletInfo structure with palletId and label fields
  * - Splits items with fullPallets into separate receiveItems entries
- * - Each full pallet becomes a separate entry with system-assigned ID
+ * - Each full pallet becomes a separate entry
  * - Partial cases become a separate entry
  * - Mixed pallets handled separately
- * - Omits "label" and "PalletID" for system-assigned unique IDs
+ * - Uses palletInfo (not pallet) with empty palletId and label fields
  */
 router.post('/send-receiving', async (req, res) => {
   console.log('[Backend] ========================================');
@@ -520,7 +520,7 @@ router.post('/send-receiving', async (req, res) => {
     // Step 2: Transform our receiving session to Extensiv format WITH PALLET SPLITTING
     console.log('[Backend] STEP 2: Transforming receiving session to Extensiv format with pallet splitting...');
     
-    // NEW: Pallet-splitting logic
+    // NEW: Pallet-splitting logic with palletInfo structure
     const receiveItems = [];
     
     receivingSession.items.forEach(item => {
@@ -549,14 +549,15 @@ router.post('/send-receiving', async (req, res) => {
               sku: item.itemNumber,
             },
             qty: item.casesPerPallet,
-            pallet: {
+            palletInfo: {
+              palletId: "",
+              label: "",
               imperial: {
                 length: defaultDimensions.length,
                 width: defaultDimensions.width,
                 height: defaultDimensions.height,
                 weight: item.casesPerPallet * weightPerCase,
               }
-              // CRITICAL: Omit "label" and "PalletID" for system-assigned unique IDs
             }
           };
           
@@ -579,14 +580,15 @@ router.post('/send-receiving', async (req, res) => {
             sku: item.itemNumber,
           },
           qty: item.partialCases,
-          pallet: {
+          palletInfo: {
+            palletId: "",
+            label: "",
             imperial: {
               length: defaultDimensions.length,
               width: defaultDimensions.width,
               height: defaultDimensions.height,
               weight: item.partialCases * weightPerCase,
             }
-            // CRITICAL: Omit "label" and "PalletID" for system-assigned unique IDs
           }
         };
         
@@ -607,14 +609,15 @@ router.post('/send-receiving', async (req, res) => {
             sku: item.itemNumber,
           },
           qty: item.mixedPalletQty,
-          pallet: {
+          palletInfo: {
+            palletId: "",
+            label: "",
             imperial: {
               length: defaultDimensions.length,
               width: defaultDimensions.width,
               height: defaultDimensions.height,
               weight: item.mixedPalletQty * weightPerCase,
             }
-            // CRITICAL: Omit "label" and "PalletID" for system-assigned unique IDs
           }
         };
         
