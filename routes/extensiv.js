@@ -1,4 +1,6 @@
 import express from 'express';
+import { loadSettings } from '../lib/extensivSettingsStore.js';
+
 const router = express.Router();
 
 const EXTENSIV_BASE_URL = 'https://secure-wms.com';
@@ -440,13 +442,14 @@ router.post('/sync-items', async (req, res) => {
 
 /**
  * POST /api/extensiv/send-receiving
- * Create a new receiver in Extensiv
+ * Create a new receiver in Extensiv with PALLET-LEVEL SPLITTING
  * 
- * NEW ENDPOINT - Receiving Transaction Integration
- * API Endpoint: POST https://secure-wms.com/inventory/receivers
- * 
- * Transforms our ReceivingSession format to Extensiv's receiver format
- * and creates a new receiving transaction in Extensiv WMS
+ * NEW: Implements pallet-splitting logic
+ * - Splits items with fullPallets into separate receiveItems entries
+ * - Each full pallet becomes a separate entry with system-assigned ID
+ * - Partial cases become a separate entry
+ * - Mixed pallets handled separately
+ * - Omits "label" and "PalletID" for system-assigned unique IDs
  */
 router.post('/send-receiving', async (req, res) => {
   console.log('[Backend] ========================================');
@@ -466,24 +469,41 @@ router.post('/send-receiving', async (req, res) => {
     console.log('[Backend] - userLoginId present:', !!userLoginId);
     console.log('[Backend] - facilityId present:', !!facilityId);
     console.log('[Backend] - receivingSession present:', !!receivingSession);
-
-    if (!clientId || !clientSecret || !userLoginId || !facilityId || !receivingSession) {
-      console.error('[Backend] Missing required fields');
+    
+    if (!clientId || !clientSecret || !userLoginId || !facilityId) {
+      console.error('[Backend] Missing required credentials');
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: clientId, clientSecret, userLoginId, facilityId, receivingSession',
+        error: 'Missing required credentials: clientId, clientSecret, userLoginId, facilityId',
+      });
+    }
+    
+    if (!receivingSession) {
+      console.error('[Backend] Missing receivingSession in request body');
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: receivingSession',
       });
     }
 
-    console.log('[Backend] Receiving session details:');
-    console.log('[Backend] - Customer:', receivingSession.customerName);
-    console.log('[Backend] - Customer ID (3PL):', receivingSession.customerId);
-    console.log('[Backend] - Container:', receivingSession.containerNumber);
-    console.log('[Backend] - Items:', receivingSession.items?.length);
+    // DEBUG LOGS - Incoming receivingSession fields
+    console.log('[Backend] 🔍 DEBUG - Incoming receivingSession fields:');
+    console.log('[Backend] receivingSession.customerId:', receivingSession.customerId);
+    console.log('[Backend] receivingSession.customerName:', receivingSession.customerName);
+    console.log('[Backend] receivingSession.containerNumber:', receivingSession.containerNumber);
+    console.log('[Backend] receivingSession.poNumber:', receivingSession.poNumber);
+    console.log('[Backend] receivingSession.items?.length:', receivingSession.items?.length);
 
-    // Step 1: Get OAuth token
-    console.log('[Backend] STEP 1: Getting OAuth token...');
-    const authResult = await getAccessToken({ clientId, clientSecret, userLoginId });
+    // DEBUG LOGS - Facility ID being used
+    console.log('[Backend] 🔍 DEBUG - Stored facilityId being used:', facilityId);
+
+    // Step 1: Get OAuth token using provided credentials
+    console.log('[Backend] STEP 1: Getting OAuth token using provided credentials...');
+    const authResult = await getAccessToken({ 
+      clientId, 
+      clientSecret, 
+      userLoginId 
+    });
     
     if (!authResult.success) {
       console.error('[Backend] OAuth token failed:', authResult.error);
@@ -495,10 +515,135 @@ router.post('/send-receiving', async (req, res) => {
     }
 
     const accessToken = authResult.token;
-    console.log('[Backend] ✅ OAuth token obtained');
+    console.log('[Backend] ✅ OAuth token obtained using provided credentials');
 
-    // Step 2: Transform our receiving session to Extensiv format
-    console.log('[Backend] STEP 2: Transforming receiving session to Extensiv format...');
+    // Step 2: Transform our receiving session to Extensiv format WITH PALLET SPLITTING
+    console.log('[Backend] STEP 2: Transforming receiving session to Extensiv format with pallet splitting...');
+    
+    // NEW: Pallet-splitting logic
+    const receiveItems = [];
+    
+    receivingSession.items.forEach(item => {
+      console.log(`[Backend] 🔍 Processing item: ${item.itemNumber}`);
+      console.log(`[Backend]   - fullPallets: ${item.fullPallets || 0}`);
+      console.log(`[Backend]   - casesPerPallet: ${item.casesPerPallet || 0}`);
+      console.log(`[Backend]   - partialCases: ${item.partialCases || 0}`);
+      console.log(`[Backend]   - mixedPallet: ${item.mixedPallet || false}`);
+      console.log(`[Backend]   - mixedPalletQty: ${item.mixedPalletQty || 0}`);
+      
+      // Default pallet dimensions (48x40x60 inches, standard US pallet)
+      const defaultDimensions = {
+        length: item.dimensions?.length || 48,
+        width: item.dimensions?.width || 40,
+        height: item.dimensions?.height || 60,
+      };
+      
+      // Calculate weight per case (estimate: 10 lbs per case if not provided)
+      const weightPerCase = 10;
+      
+      // Create separate entries for each FULL pallet
+      if (item.fullPallets && item.fullPallets > 0 && item.casesPerPallet && item.casesPerPallet > 0) {
+        for (let i = 0; i < item.fullPallets; i++) {
+          const palletEntry = {
+            itemIdentifier: {
+              sku: item.itemNumber,
+            },
+            qty: item.casesPerPallet,
+            pallet: {
+              imperial: {
+                length: defaultDimensions.length,
+                width: defaultDimensions.width,
+                height: defaultDimensions.height,
+                weight: item.casesPerPallet * weightPerCase,
+              }
+              // CRITICAL: Omit "label" and "PalletID" for system-assigned unique IDs
+            }
+          };
+          
+          // Add optional fields if present
+          if (item.notes) {
+            palletEntry.savedElements = [
+              { name: 'notes', value: item.notes }
+            ];
+          }
+          
+          receiveItems.push(palletEntry);
+          console.log(`[Backend]   ✅ Created full pallet entry ${i + 1}/${item.fullPallets}: ${item.casesPerPallet} cases`);
+        }
+      }
+      
+      // Create entry for PARTIAL cases (if any)
+      if (item.partialCases && item.partialCases > 0) {
+        const partialEntry = {
+          itemIdentifier: {
+            sku: item.itemNumber,
+          },
+          qty: item.partialCases,
+          pallet: {
+            imperial: {
+              length: defaultDimensions.length,
+              width: defaultDimensions.width,
+              height: defaultDimensions.height,
+              weight: item.partialCases * weightPerCase,
+            }
+            // CRITICAL: Omit "label" and "PalletID" for system-assigned unique IDs
+          }
+        };
+        
+        if (item.notes) {
+          partialEntry.savedElements = [
+            { name: 'notes', value: `${item.notes} | Partial pallet` }
+          ];
+        }
+        
+        receiveItems.push(partialEntry);
+        console.log(`[Backend]   ✅ Created partial pallet entry: ${item.partialCases} cases`);
+      }
+      
+      // Create entry for MIXED pallet (if any)
+      if (item.mixedPallet && item.mixedPalletQty && item.mixedPalletQty > 0) {
+        const mixedEntry = {
+          itemIdentifier: {
+            sku: item.itemNumber,
+          },
+          qty: item.mixedPalletQty,
+          pallet: {
+            imperial: {
+              length: defaultDimensions.length,
+              width: defaultDimensions.width,
+              height: defaultDimensions.height,
+              weight: item.mixedPalletQty * weightPerCase,
+            }
+            // CRITICAL: Omit "label" and "PalletID" for system-assigned unique IDs
+          }
+        };
+        
+        if (item.notes) {
+          mixedEntry.savedElements = [
+            { name: 'notes', value: `${item.notes} | Mixed pallet` }
+          ];
+        } else {
+          mixedEntry.savedElements = [
+            { name: 'notes', value: 'Mixed pallet' }
+          ];
+        }
+        
+        receiveItems.push(mixedEntry);
+        console.log(`[Backend]   ✅ Created mixed pallet entry: ${item.mixedPalletQty} cases`);
+      }
+      
+      // Handle damaged/defective items
+      if (item.condition === 'damaged' || item.condition === 'defective') {
+        receiveItems.forEach(entry => {
+          if (entry.itemIdentifier.sku === item.itemNumber) {
+            entry.onHold = true;
+            entry.onHoldReason = `Item condition: ${item.condition}`;
+          }
+        });
+      }
+    });
+    
+    console.log(`[Backend] 📦 Total pallet entries created: ${receiveItems.length}`);
     
     const extensivPayload = {
       customerIdentifier: {
@@ -520,42 +665,29 @@ router.post('/send-receiving', async (req, res) => {
         `Received by: ${receivingSession.startedBy}`,
         receivingSession.reviewNotes ? `Review notes: ${receivingSession.reviewNotes}` : '',
         receivingSession.type === 'blind' ? 'Blind receipt (no ASN)' : '',
+        `Pallet-level receiving: ${receiveItems.length} pallet entries`,
       ].filter(Boolean).join(' | '),
-      receiveItems: receivingSession.items.map(item => {
-        const receiveItem = {
-          itemIdentifier: {
-            sku: item.itemNumber,
-          },
-          qty: item.receivedQty,
-        };
-
-        // Add optional fields if present
-        if (item.notes) {
-          receiveItem.savedElements = [
-            { name: 'notes', value: item.notes }
-          ];
-        }
-
-        // Handle damaged/defective items
-        if (item.condition === 'damaged' || item.condition === 'defective') {
-          receiveItem.onHold = true;
-          receiveItem.onHoldReason = `Item condition: ${item.condition}`;
-        }
-
-        return receiveItem;
-      }),
+      receiveItems: receiveItems,
     };
+
+    // DEBUG LOGS - Final Extensiv payload fields
+    console.log('[Backend] 🔍 DEBUG - Final Extensiv payload fields:');
+    console.log('[Backend] extensivPayload.customerIdentifier.id:', extensivPayload.customerIdentifier.id);
+    console.log('[Backend] extensivPayload.facilityIdentifier.id:', extensivPayload.facilityIdentifier.id);
+    console.log('[Backend] extensivPayload.referenceNum:', extensivPayload.referenceNum);
+    console.log('[Backend] extensivPayload.poNum:', extensivPayload.poNum);
+    console.log('[Backend] extensivPayload.externalId:', extensivPayload.externalId);
 
     console.log('[Backend] Transformed payload:');
     console.log('[Backend] - Customer ID:', extensivPayload.customerIdentifier.id);
     console.log('[Backend] - Facility ID:', extensivPayload.facilityIdentifier.id);
     console.log('[Backend] - Reference #:', extensivPayload.referenceNum);
     console.log('[Backend] - PO #:', extensivPayload.poNum);
-    console.log('[Backend] - Items count:', extensivPayload.receiveItems.length);
-    console.log('[Backend] Full payload (first 2000 chars):', JSON.stringify(extensivPayload, null, 2).substring(0, 2000));
+    console.log('[Backend] - Pallet entries count:', extensivPayload.receiveItems.length);
+    console.log('[Backend] Full payload (first 3000 chars):', JSON.stringify(extensivPayload, null, 2).substring(0, 3000));
 
     // Step 3: Send to Extensiv
-    console.log('[Backend] STEP 3: Sending receiver to Extensiv...');
+    console.log('[Backend] STEP 3: Sending receiver with pallet-level data to Extensiv...');
     const endpoint = `${EXTENSIV_BASE_URL}/inventory/receivers`;
     console.log('[Backend] POST', endpoint);
 
@@ -600,7 +732,7 @@ router.post('/send-receiving', async (req, res) => {
       });
     }
 
-    console.log('[Backend] ✅ Receiver created successfully');
+    console.log('[Backend] ✅ Receiver created successfully with pallet-level data');
     console.log('[Backend] Receiver response keys:', Object.keys(receiverData));
     
     // Extract receiver ID from response
@@ -609,13 +741,15 @@ router.post('/send-receiving', async (req, res) => {
     
     console.log('[Backend] Receiver ID:', receiverId);
     console.log('[Backend] Receiver Number:', receiverNumber);
+    console.log('[Backend] Total pallets sent:', receiveItems.length);
 
     return res.json({
       success: true,
       receiverId: receiverId,
       receiverNumber: receiverNumber,
+      totalPallets: receiveItems.length,
       extensivResponse: receiverData,
-      message: 'Receiver created successfully in Extensiv',
+      message: `Receiver created successfully in Extensiv with ${receiveItems.length} pallet entries`,
     });
 
   } catch (error) {
