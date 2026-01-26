@@ -438,4 +438,195 @@ router.post('/sync-items', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/extensiv/send-receiving
+ * Create a new receiver in Extensiv
+ * 
+ * NEW ENDPOINT - Receiving Transaction Integration
+ * API Endpoint: POST https://secure-wms.com/inventory/receivers
+ * 
+ * Transforms our ReceivingSession format to Extensiv's receiver format
+ * and creates a new receiving transaction in Extensiv WMS
+ */
+router.post('/send-receiving', async (req, res) => {
+  console.log('[Backend] ========================================');
+  console.log('[Backend] Handler /api/extensiv/send-receiving started at', new Date().toISOString());
+  console.log('[Backend] ========================================');
+  
+  res.setHeader('Content-Type', 'application/json');
+  
+  try {
+    console.log('[Backend] Request body keys:', Object.keys(req.body));
+    
+    const { clientId, clientSecret, userLoginId, facilityId, receivingSession } = req.body;
+    
+    console.log('[Backend] Credentials check:');
+    console.log('[Backend] - clientId present:', !!clientId);
+    console.log('[Backend] - clientSecret present:', !!clientSecret);
+    console.log('[Backend] - userLoginId present:', !!userLoginId);
+    console.log('[Backend] - facilityId present:', !!facilityId);
+    console.log('[Backend] - receivingSession present:', !!receivingSession);
+
+    if (!clientId || !clientSecret || !userLoginId || !facilityId || !receivingSession) {
+      console.error('[Backend] Missing required fields');
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: clientId, clientSecret, userLoginId, facilityId, receivingSession',
+      });
+    }
+
+    console.log('[Backend] Receiving session details:');
+    console.log('[Backend] - Customer:', receivingSession.customerName);
+    console.log('[Backend] - Customer ID (3PL):', receivingSession.customerId);
+    console.log('[Backend] - Container:', receivingSession.containerNumber);
+    console.log('[Backend] - Items:', receivingSession.items?.length);
+
+    // Step 1: Get OAuth token
+    console.log('[Backend] STEP 1: Getting OAuth token...');
+    const authResult = await getAccessToken({ clientId, clientSecret, userLoginId });
+    
+    if (!authResult.success) {
+      console.error('[Backend] OAuth token failed:', authResult.error);
+      return res.status(401).json({
+        success: false,
+        error: authResult.error,
+        step: 'token',
+      });
+    }
+
+    const accessToken = authResult.token;
+    console.log('[Backend] ✅ OAuth token obtained');
+
+    // Step 2: Transform our receiving session to Extensiv format
+    console.log('[Backend] STEP 2: Transforming receiving session to Extensiv format...');
+    
+    const extensivPayload = {
+      customerIdentifier: {
+        id: parseInt(receivingSession.customerId) || 0,
+      },
+      facilityIdentifier: {
+        id: parseInt(facilityId) || 0,
+      },
+      warehouseTransactionSourceEnum: 7, // How the transaction entered the system
+      transactionEntryType: 4, // The Agent creating the transaction
+      isReturn: false,
+      deferNotification: false,
+      referenceNum: receivingSession.containerNumber || `REF-${Date.now()}`,
+      poNum: receivingSession.poNumber || '',
+      externalId: receivingSession.id || '',
+      arrivalDate: receivingSession.completedAt || new Date().toISOString(),
+      expectedDate: receivingSession.startedAt || new Date().toISOString(),
+      notes: [
+        `Received by: ${receivingSession.startedBy}`,
+        receivingSession.reviewNotes ? `Review notes: ${receivingSession.reviewNotes}` : '',
+        receivingSession.type === 'blind' ? 'Blind receipt (no ASN)' : '',
+      ].filter(Boolean).join(' | '),
+      receiveItems: receivingSession.items.map(item => {
+        const receiveItem = {
+          itemIdentifier: {
+            sku: item.itemNumber,
+          },
+          qty: item.receivedQty,
+        };
+
+        // Add optional fields if present
+        if (item.notes) {
+          receiveItem.savedElements = [
+            { name: 'notes', value: item.notes }
+          ];
+        }
+
+        // Handle damaged/defective items
+        if (item.condition === 'damaged' || item.condition === 'defective') {
+          receiveItem.onHold = true;
+          receiveItem.onHoldReason = `Item condition: ${item.condition}`;
+        }
+
+        return receiveItem;
+      }),
+    };
+
+    console.log('[Backend] Transformed payload:');
+    console.log('[Backend] - Customer ID:', extensivPayload.customerIdentifier.id);
+    console.log('[Backend] - Facility ID:', extensivPayload.facilityIdentifier.id);
+    console.log('[Backend] - Reference #:', extensivPayload.referenceNum);
+    console.log('[Backend] - PO #:', extensivPayload.poNum);
+    console.log('[Backend] - Items count:', extensivPayload.receiveItems.length);
+    console.log('[Backend] Full payload (first 2000 chars):', JSON.stringify(extensivPayload, null, 2).substring(0, 2000));
+
+    // Step 3: Send to Extensiv
+    console.log('[Backend] STEP 3: Sending receiver to Extensiv...');
+    const endpoint = `${EXTENSIV_BASE_URL}/inventory/receivers`;
+    console.log('[Backend] POST', endpoint);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json; charset=utf-8',
+        'Accept': 'application/hal+json',
+        'Accept-Language': 'en-US,en;q=0.8',
+      },
+      body: JSON.stringify(extensivPayload),
+    });
+
+    console.log('[Backend] Response Status:', response.status);
+
+    const responseText = await response.text();
+    console.log('[Backend] Response text (first 2000 chars):', responseText.substring(0, 2000));
+
+    if (!response.ok) {
+      console.error('[Backend] Failed to create receiver:', response.status);
+      console.error('[Backend] Error response:', responseText);
+      
+      return res.status(response.status).json({
+        success: false,
+        error: `Failed to create receiver in Extensiv (${response.status})`,
+        details: responseText.substring(0, 1000),
+        payload: extensivPayload,
+      });
+    }
+
+    // Parse response
+    let receiverData;
+    try {
+      receiverData = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('[Backend] Failed to parse receiver response:', parseError.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Invalid JSON response from Extensiv',
+        details: responseText.substring(0, 1000),
+      });
+    }
+
+    console.log('[Backend] ✅ Receiver created successfully');
+    console.log('[Backend] Receiver response keys:', Object.keys(receiverData));
+    
+    // Extract receiver ID from response
+    const receiverId = receiverData.Id || receiverData.id || receiverData.ReceiverId || null;
+    const receiverNumber = receiverData.ReferenceNum || receiverData.referenceNum || extensivPayload.referenceNum;
+    
+    console.log('[Backend] Receiver ID:', receiverId);
+    console.log('[Backend] Receiver Number:', receiverNumber);
+
+    return res.json({
+      success: true,
+      receiverId: receiverId,
+      receiverNumber: receiverNumber,
+      extensivResponse: receiverData,
+      message: 'Receiver created successfully in Extensiv',
+    });
+
+  } catch (error) {
+    console.error('[Backend] ❌ UNHANDLED EXCEPTION in send-receiving:', error.message);
+    console.error('[Backend] Stack trace:', error.stack);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error',
+      details: error.stack,
+    });
+  }
+});
+
 export default router;
