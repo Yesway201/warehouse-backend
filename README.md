@@ -114,3 +114,4 @@ heroku config:set FRONTEND_URL=https://your-frontend-url.com
 - Enable CORS only for your frontend domain in production
 - Consider rate limiting for production use
 - Use HTTPS in production# Test redeploy Mon Jan 26 21:50:32 PST 2026
+# Redeploy test Mon Jan 26 22:02:28 PST 2026
