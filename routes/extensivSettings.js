@@ -1,40 +1,41 @@
 import express from 'express';
-import { loadSettings, saveSettings, clearSettings, getStorageInfo, maskValue } from '../lib/extensivSettingsStore.js';
+import { 
+  loadExtensivSettings, 
+  saveExtensivSettings, 
+  clearExtensivSettings, 
+  getExtensivStorageInfo, 
+  maskValue 
+} from '../lib/settingsStore.js';
 
 const router = express.Router();
 
+console.log('[ExtensivSettingsRoutes] mounted');
+
 /**
  * GET /api/extensiv-settings
- * Load saved Extensiv credentials
+ * Load Extensiv settings from server-side storage
  */
 router.get('/', async (req, res) => {
+  console.log('[ExtensivSettings] GET /');
   try {
-    console.log('[ExtensivSettings API] Loading credentials...');
+    const settings = loadExtensivSettings();
     
-    const settings = loadSettings();
-    
-    // Return settings with masked client_secret for security
-    const response = {
+    return res.json({
       success: true,
       settings: {
-        clientId: settings.clientId,
-        clientSecret: settings.clientSecret ? maskValue(settings.clientSecret) : null,
-        clientSecretMasked: !!settings.clientSecret,
+        clientIdMasked: settings.clientId ? maskValue(settings.clientId) : null,
+        clientSecretMasked: settings.clientSecret ? maskValue(settings.clientSecret) : null,
         userLoginId: settings.userLoginId,
         facilityId: settings.facilityId,
-        lastUpdated: settings.lastUpdated
-      },
-      // Include full unmasked credentials for actual use (frontend will handle securely)
-      credentials: settings
-    };
-    
-    console.log('[ExtensivSettings API] Credentials loaded successfully');
-    res.json(response);
+        lastUpdated: settings.lastUpdated,
+        configured: !!(settings.clientId && settings.clientSecret && settings.userLoginId && settings.facilityId)
+      }
+    });
   } catch (error) {
-    console.error('[ExtensivSettings API] Error loading credentials:', error);
-    res.status(500).json({
+    console.error('[ExtensivSettings] Failed to load settings:', error);
+    return res.status(500).json({
       success: false,
-      error: 'Failed to load credentials',
+      error: 'Failed to load settings from server',
       details: error.message
     });
   }
@@ -42,52 +43,45 @@ router.get('/', async (req, res) => {
 
 /**
  * POST /api/extensiv-settings
- * Save Extensiv credentials
+ * Save Extensiv settings to server-side storage
  */
 router.post('/', async (req, res) => {
+  console.log('[ExtensivSettings] POST /');
   try {
-    console.log('[ExtensivSettings API] Saving credentials...');
-    
     const { clientId, clientSecret, userLoginId, facilityId } = req.body;
-    
-    // Validate required fields
+
     if (!clientId || !clientSecret || !userLoginId || !facilityId) {
-      console.error('[ExtensivSettings API] Missing required fields');
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: clientId, clientSecret, userLoginId, facilityId'
+        error: 'All fields are required: clientId, clientSecret, userLoginId, facilityId'
       });
     }
-    
-    const settings = {
+
+    const saved = saveExtensivSettings({
       clientId,
       clientSecret,
       userLoginId,
       facilityId
-    };
-    
-    const success = saveSettings(settings);
-    
-    if (success) {
-      console.log('[ExtensivSettings API] Credentials saved successfully');
-      res.json({
-        success: true,
-        message: 'Credentials saved successfully',
-        settings: {
-          clientId: settings.clientId,
-          clientSecret: maskValue(settings.clientSecret),
-          userLoginId: settings.userLoginId,
-          facilityId: settings.facilityId
-        }
+    });
+
+    if (!saved) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to save settings to server storage'
       });
-    } else {
-      throw new Error('Failed to save credentials');
     }
+
+    return res.json({
+      success: true,
+      message: 'Settings saved successfully',
+      clientIdMasked: maskValue(clientId),
+      clientSecretMasked: maskValue(clientSecret)
+    });
   } catch (error) {
-    console.error('[ExtensivSettings API] Error saving credentials:', error);
-    res.status(500).json({
+    console.error('[ExtensivSettings] Failed to save settings:', error);
+    return res.status(500).json({
       success: false,
-      error: 'Failed to save credentials',
+      error: 'Failed to save settings',
       details: error.message
     });
   }
@@ -95,49 +89,51 @@ router.post('/', async (req, res) => {
 
 /**
  * DELETE /api/extensiv-settings
- * Clear saved Extensiv credentials
+ * Clear Extensiv settings from server-side storage
  */
 router.delete('/', async (req, res) => {
+  console.log('[ExtensivSettings] DELETE /');
   try {
-    console.log('[ExtensivSettings API] Clearing credentials...');
-    
-    const success = clearSettings();
-    
-    if (success) {
-      console.log('[ExtensivSettings API] Credentials cleared successfully');
-      res.json({
-        success: true,
-        message: 'Credentials cleared successfully'
+    const cleared = clearExtensivSettings();
+
+    if (!cleared) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to clear settings from server storage'
       });
-    } else {
-      throw new Error('Failed to clear credentials');
     }
+
+    return res.json({
+      success: true,
+      message: 'Settings cleared successfully'
+    });
   } catch (error) {
-    console.error('[ExtensivSettings API] Error clearing credentials:', error);
-    res.status(500).json({
+    console.error('[ExtensivSettings] Failed to clear settings:', error);
+    return res.status(500).json({
       success: false,
-      error: 'Failed to clear credentials',
+      error: 'Failed to clear settings',
       details: error.message
     });
   }
 });
 
 /**
- * GET /api/extensiv-settings/status
- * Get storage status and configuration info
+ * GET /api/extensiv-settings/storage-info
+ * Get storage information for debugging
  */
-router.get('/status', async (req, res) => {
+router.get('/storage-info', async (req, res) => {
+  console.log('[ExtensivSettings] GET /storage-info');
   try {
-    const storageInfo = getStorageInfo();
-    res.json({
+    const info = getExtensivStorageInfo();
+    return res.json({
       success: true,
-      storage: storageInfo
+      ...info
     });
   } catch (error) {
-    console.error('[ExtensivSettings API] Error getting status:', error);
-    res.status(500).json({
+    console.error('[ExtensivSettings] Failed to get storage info:', error);
+    return res.status(500).json({
       success: false,
-      error: 'Failed to get status',
+      error: 'Failed to get storage info',
       details: error.message
     });
   }
