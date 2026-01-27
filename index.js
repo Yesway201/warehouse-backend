@@ -3,6 +3,7 @@ import cors from 'cors';
 import extensivRoutes from './routes/extensiv.js';
 import smartsheetRoutes from './routes/smartsheet.js';
 import extensivSettingsRoutes from './routes/extensivSettings.js';
+import customersRoutes from './routes/customers.js';
 import { debugStorage } from './lib/storageDebug.js';
 
 const app = express();
@@ -53,6 +54,7 @@ app.get('/api/debug/storage', (req, res) => {
 app.use('/api/extensiv', extensivRoutes);
 app.use('/api/smartsheet', smartsheetRoutes);
 app.use('/api/extensiv-settings', extensivSettingsRoutes);
+app.use('/api/customers', customersRoutes);
 
 // Debug endpoint - list all registered routes
 app.get('/api/debug/routes', (req, res) => {
@@ -100,6 +102,7 @@ app.listen(PORT, () => {
   console.log(`[Server] Extensiv API: http://localhost:${PORT}/api/extensiv/*`);
   console.log(`[Server] Smartsheet API: http://localhost:${PORT}/api/smartsheet/*`);
   console.log(`[Server] Extensiv Settings API: http://localhost:${PORT}/api/extensiv-settings`);
+  console.log(`[Server] Customers API: http://localhost:${PORT}/api/customers`);
   
   // Run storage debug on startup
   console.log('\n[Server] Running storage diagnostics...');
