@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connection Test - Diagnostic Page</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; margin-top: 0; }
+        h2 { color: #666; font-size: 18px; margin-top: 0; }
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover { background: #1d4ed8; }
+        button:disabled { background: #9ca3af; cursor: not-allowed; }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+        .error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+        .info { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+        input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: 500;
+            color: #374151;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔍 Backend Connection Diagnostic</h1>
+        <p>This page tests the connection to the Railway backend from your current environment.</p>
+    </div>
+
+    <div class="card">
+        <h2>Environment Information</h2>
+        <div id="envInfo" class="result info">Loading...</div>
+    </div>
+
+    <div class="card">
+        <h2>Test 1: Health Check</h2>
+        <button onclick="testHealthCheck()">Run Health Check</button>
+        <div id="healthResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>Test 2: CORS Preflight</h2>
+        <button onclick="testCORS()">Test CORS</button>
+        <div id="corsResult"></div>
+    </div>
+
+    <div class="card">
+        <h2>Test 3: Smartsheet Connection (with credentials)</h2>
+        <label>
+            API Token:
+            <input type="password" id="apiToken" placeholder="Enter your Smartsheet API token">
+        </label>
+        <label>
+            Sheet ID:
+            <input type="text" id="sheetId" placeholder="Enter your Sheet ID">
+        </label>
+        <button onclick="testSmartsheetConnection()">Test Connection</button>
+        <div id="smartsheetResult"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'https://warehouse-backend-production-4200.up.railway.app';
+
+        // Display environment info
+        document.getElementById('envInfo').textContent = `
+Current URL: ${window.location.href}
+Origin: ${window.location.origin}
+Protocol: ${window.location.protocol}
+User Agent: ${navigator.userAgent}
+Online: ${navigator.onLine}
+        `.trim();
+
+        async function testHealthCheck() {
+            const resultDiv = document.getElementById('healthResult');
+            resultDiv.innerHTML = '<div class="result info">Testing...</div>';
+            
+            try {
+                const startTime = Date.now();
+                const response = await fetch(`${API_BASE}/health`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                const duration = Date.now() - startTime;
+                const data = await response.json();
+                
+                resultDiv.innerHTML = `
+                    <div class="result success">
+✅ Health Check Successful (${duration}ms)
+
+Status: ${response.status}
+Response: ${JSON.stringify(data, null, 2)}
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+❌ Health Check Failed
+
+Error Type: ${error.name}
+Error Message: ${error.message}
+Stack: ${error.stack}
+                    </div>
+                `;
+            }
+        }
+
+        async function testCORS() {
+            const resultDiv = document.getElementById('corsResult');
+            resultDiv.innerHTML = '<div class="result info">Testing CORS...</div>';
+            
+            try {
+                const startTime = Date.now();
+                const response = await fetch(`${API_BASE}/api/smartsheet/test-connection`, {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Origin': window.location.origin,
+                        'Access-Control-Request-Method': 'POST',
+                        'Access-Control-Request-Headers': 'content-type'
+                    }
+                });
+                const duration = Date.now() - startTime;
+                
+                const corsHeaders = {
+                    'access-control-allow-origin': response.headers.get('access-control-allow-origin'),
+                    'access-control-allow-methods': response.headers.get('access-control-allow-methods'),
+                    'access-control-allow-headers': response.headers.get('access-control-allow-headers')
+                };
+                
+                resultDiv.innerHTML = `
+                    <div class="result success">
+✅ CORS Preflight Successful (${duration}ms)
+
+Status: ${response.status}
+CORS Headers: ${JSON.stringify(corsHeaders, null, 2)}
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+❌ CORS Test Failed
+
+Error Type: ${error.name}
+Error Message: ${error.message}
+Stack: ${error.stack}
+                    </div>
+                `;
+            }
+        }
+
+        async function testSmartsheetConnection() {
+            const resultDiv = document.getElementById('smartsheetResult');
+            const apiToken = document.getElementById('apiToken').value;
+            const sheetId = document.getElementById('sheetId').value;
+            
+            if (!apiToken || !sheetId) {
+                resultDiv.innerHTML = '<div class="result error">❌ Please enter both API Token and Sheet ID</div>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<div class="result info">Testing Smartsheet connection...</div>';
+            
+            try {
+                const startTime = Date.now();
+                const response = await fetch(`${API_BASE}/api/smartsheet/test-connection`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ apiToken, sheetId })
+                });
+                const duration = Date.now() - startTime;
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <div class="result success">
+✅ Smartsheet Connection Successful (${duration}ms)
+
+Status: ${response.status}
+Response: ${JSON.stringify(data, null, 2)}
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+❌ Smartsheet Connection Failed (${duration}ms)
+
+Status: ${response.status}
+Error: ${JSON.stringify(data, null, 2)}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+❌ Smartsheet Test Failed
+
+Error Type: ${error.name}
+Error Message: ${error.message}
+Stack: ${error.stack}
+
+This usually means:
+1. Network request was blocked by browser/environment
+2. CORS issue (but preflight passed, so unlikely)
+3. Fetch API is restricted in this environment
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
