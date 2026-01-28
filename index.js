@@ -4,6 +4,7 @@ import extensivRoutes from './routes/extensiv.js';
 import smartsheetRoutes from './routes/smartsheet.js';
 import extensivSettingsRoutes from './routes/extensivSettings.js';
 import customersRoutes from './routes/customers.js';
+import healthCheckRoutes from './routes/healthCheck.js';
 import { debugStorage } from './lib/storageDebug.js';
 
 const app = express();
@@ -55,6 +56,7 @@ app.use('/api/extensiv', extensivRoutes);
 app.use('/api/smartsheet', smartsheetRoutes);
 app.use('/api/extensiv-settings', extensivSettingsRoutes);
 app.use('/api/customers', customersRoutes);
+app.use('/api/health-check', healthCheckRoutes);
 
 // Debug endpoint - list all registered routes
 app.get('/api/debug/routes', (req, res) => {
@@ -70,9 +72,9 @@ app.get('/api/debug/routes', (req, res) => {
       middleware.handle.stack.forEach((handler) => {
         if (handler.route) {
           const path = middleware.regexp.source
-            .replace('\\/?', '')
-            .replace('(?=\\/|$)', '')
-            .replace(/\\\//g, '/')
+            .replace('\\\\/?', '')
+            .replace('(?=\\\\/|$)', '')
+            .replace(/\\\\\//g, '/')
             .replace('^', '');
           routes.push({
             path: path + handler.route.path,
@@ -99,6 +101,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`[Server] Warehouse Management Backend running on port ${PORT}`);
   console.log(`[Server] Health check: http://localhost:${PORT}/api/health`);
+  console.log(`[Server] Volume health check: http://localhost:${PORT}/api/health-check`);
   console.log(`[Server] Extensiv API: http://localhost:${PORT}/api/extensiv/*`);
   console.log(`[Server] Smartsheet API: http://localhost:${PORT}/api/smartsheet/*`);
   console.log(`[Server] Extensiv Settings API: http://localhost:${PORT}/api/extensiv-settings`);
