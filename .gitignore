@@ -40,4 +40,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-*~storage/
+storage/
+# Storage directory (contains credentials)
+storage/
