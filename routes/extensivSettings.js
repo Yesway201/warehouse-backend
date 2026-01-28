@@ -14,14 +14,22 @@ console.log('[ExtensivSettingsRoutes] mounted');
 /**
  * GET /api/extensiv-settings
  * Load Extensiv settings from server-side storage
+ * Returns FULL DECRYPTED credentials for frontend to populate input fields
  */
 router.get('/', async (req, res) => {
   console.log('[ExtensivSettings] GET /');
   try {
     const settings = loadExtensivSettings();
     
+    // Return full decrypted credentials in "credentials" object for frontend compatibility
     return res.json({
       success: true,
+      credentials: {
+        clientId: settings.clientId || '',
+        clientSecret: settings.clientSecret || '',
+        userLoginId: settings.userLoginId || '',
+        facilityId: settings.facilityId || ''
+      },
       settings: {
         clientIdMasked: settings.clientId ? maskValue(settings.clientId) : null,
         clientSecretMasked: settings.clientSecret ? maskValue(settings.clientSecret) : null,
