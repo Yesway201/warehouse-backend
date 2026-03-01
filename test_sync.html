@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sync Test</title>
+</head>
+<body>
+    <h1>Testing Smartsheet Sync</h1>
+    <button onclick="testSync()">Test Sync</button>
+    <pre id="result"></pre>
+    
+    <script>
+        async function testSync() {
+            const resultEl = document.getElementById('result');
+            resultEl.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch('/api/smartsheet/fetch-deliveries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        apiToken: 'q9MgMjegggjqp24oi9sfaLVqJjnMFOMevnnqv',
+                        sheetId: '8551818792488836',
+                        columnMappings: {
+                            containerNumber: 'PO # / Container #',
+                            customerName: 'Customer Name',
+                            poNumber: 'PO # / Container #',
+                            door: 'Door #',
+                            expectedDate: 'Date',
+                            carrier: 'Carrier',
+                            status: 'Status',
+                            notes: 'Additional Information',
+                            trackingNumber: '3PL # ',
+                            done: 'Done'
+                        }
+                    })
+                });
+                
+                const data = await response.json();
+                resultEl.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                resultEl.textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

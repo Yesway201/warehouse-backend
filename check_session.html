@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check Receiving Session</title>
+</head>
+<body>
+    <h1>Receiving Session Debug</h1>
+    <pre id="output"></pre>
+    <script>
+        const output = document.getElementById('output');
+        
+        // Check localStorage
+        const sessions = JSON.parse(localStorage.getItem('receivingSessions') || '[]');
+        const customers = JSON.parse(localStorage.getItem('customers') || '[]');
+        
+        output.textContent = 'Receiving Sessions:\n' + JSON.stringify(sessions, null, 2) + '\n\n';
+        output.textContent += 'Customers:\n' + JSON.stringify(customers, null, 2);
+    </script>
+</body>
+</html>

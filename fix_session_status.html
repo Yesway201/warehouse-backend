@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fix Session Status</title>
+</head>
+<body>
+    <h1>Session Status Fixer</h1>
+    <div id="output"></div>
+    <script>
+        const sessions = JSON.parse(localStorage.getItem('receivingSessions') || '[]');
+        const output = document.getElementById('output');
+        
+        output.innerHTML = '<h2>Current Sessions:</h2>';
+        sessions.forEach((session, idx) => {
+            output.innerHTML += `<p>${idx + 1}. ID: ${session.id}, Status: ${session.status}, Customer: ${session.customerName}</p>`;
+        });
+        
+        // Fix sessions with 'completed' status to 'pending-review'
+        const fixed = sessions.map(session => {
+            if (session.status === 'completed') {
+                return { ...session, status: 'pending-review' };
+            }
+            return session;
+        });
+        
+        localStorage.setItem('receivingSessions', JSON.stringify(fixed));
+        
+        output.innerHTML += '<h2 style="color: green;">✓ Fixed! Sessions with "completed" status changed to "pending-review"</h2>';
+        output.innerHTML += '<p>Please refresh the Review Queue page to see the session.</p>';
+    </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>Check Customers</title></head>
+<body>
+<h1>Customer Data Check</h1>
+<pre id="output"></pre>
+<script>
+const customers = localStorage.getItem('customers');
+const output = document.getElementById('output');
+if (customers) {
+  output.textContent = 'Customers found in localStorage:\n' + JSON.stringify(JSON.parse(customers), null, 2);
+} else {
+  output.textContent = 'No customers found in localStorage';
+}
+</script>
+</body>
+</html>

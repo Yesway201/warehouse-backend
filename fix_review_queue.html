@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head><title>Fix Review Queue</title></head>
+<body>
+<h1>Review Queue Fix</h1>
+<div id="output"></div>
+<button onclick="fixSessions()">Fix Sessions Now</button>
+<script>
+const sessions = JSON.parse(localStorage.getItem('receivingSessions') || '[]');
+const output = document.getElementById('output');
+
+output.innerHTML = '<h2>Current Sessions:</h2>';
+sessions.forEach((s, idx) => {
+  output.innerHTML += `
+    <div style="border:1px solid #ccc; padding:10px; margin:10px 0;">
+      <p><strong>Session ${idx + 1}:</strong></p>
+      <p>ID: ${s.id}</p>
+      <p>Status: <strong style="color:red">${s.status}</strong></p>
+      <p>Type: ${s.type || 'asn-based'}</p>
+      <p>Synced: ${s.syncedToExtensiv || false}</p>
+      <p>Customer: ${s.customerName}</p>
+      <p>Container: ${s.containerNumber}</p>
+    </div>
+  `;
+});
+
+function fixSessions() {
+  const fixed = sessions.map(s => {
+    if (!s.type) {
+      s.type = 'asn-based';
+    }
+    if (s.syncedToExtensiv === undefined) {
+      s.syncedToExtensiv = false;
+    }
+    return s;
+  });
+  localStorage.setItem('receivingSessions', JSON.stringify(fixed));
+  alert('Sessions fixed! Please refresh the page.');
+  location.reload();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,716 @@
+import { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
+import { Delivery, Item, ReceivingSession, APIConfig, Customer, ASN, SlipRequest, SyncLog } from '@/types';
+import { smartsheetAPI, extensivAPI, itemsAPI, customersAPI } from '@/lib/api';
+import * as asnAPI from '@/lib/asnApi';
+import { toast } from 'sonner';
+import { SyncStatus } from '@/types/item';
+
+interface DataContextType {
+  deliveries: Delivery[];
+  items: Item[];
+  receivingSessions: ReceivingSession[];
+  apiConfig: APIConfig | null;
+  customers: Customer[];
+  slipRequests: SlipRequest[];
+  asns: ASN[];
+  extensivItems: Item[];
+  syncLogs: SyncLog[];
+  isLoading: boolean;
+  addDelivery: (delivery: Delivery) => void;
+  updateDelivery: (id: string, updates: Partial<Delivery>) => void;
+  deleteDelivery: (id: string) => void;
+  setDeliveries: (deliveries: Delivery[]) => void;
+  addItem: (item: Item) => void;
+  updateItem: (id: string, updates: Partial<Item>) => void;
+  setItems: (items: Item[]) => void;
+  setExtensivItems: (items: Item[]) => void;
+  addReceivingSession: (session: ReceivingSession) => void;
+  updateReceivingSession: (id: string, updates: Partial<ReceivingSession>) => void;
+  updateAPIConfig: (config: APIConfig) => void;
+  addCustomer: (customer: Customer) => void;
+  updateCustomer: (id: string, updates: Partial<Customer>) => void;
+  deleteCustomer: (id: string) => void;
+  addSlipRequest: (request: SlipRequest) => void;
+  updateSlipRequest: (id: string, updates: Partial<SlipRequest>) => void;
+  addASN: (asn: ASN) => void;
+  updateASN: (id: string, updates: Partial<ASN>) => void;
+  deleteASN: (id: string) => void;
+  syncFromSmartsheet: () => Promise<void>;
+  syncExtensivItems: () => Promise<void>;
+  addSyncLog: (log: SyncLog) => void;
+  loadItemsFromBackend: (customerId?: string) => Promise<void>;
+  loadCustomersFromBackend: () => Promise<void>;
+  loadASNsFromBackend: () => Promise<void>;
+  forceFullSync: () => Promise<void>;
+  getItemSyncStatus: (customerId: string) => Promise<SyncStatus | null>;
+}
+
+const DataContext = createContext<DataContextType | undefined>(undefined);
+
+// Helper function to deduplicate customers by 3PL ID (keeping the most recent)
+const deduplicateCustomers = (customers: Customer[]): Customer[] => {
+  const customerMap = new Map<string, Customer>();
+  
+  customers.forEach(customer => {
+    const existing = customerMap.get(customer.thirdPartyLogisticsId);
+    
+    // Keep the customer with the most recent updatedAt timestamp
+    if (!existing || new Date(customer.updatedAt) > new Date(existing.updatedAt)) {
+      customerMap.set(customer.thirdPartyLogisticsId, customer);
+    }
+  });
+  
+  return Array.from(customerMap.values());
+};
+
+// Helper function to convert backend ASN to frontend ASN format
+const convertBackendASNToFrontend = (backendASN: asnAPI.BackendASN): ASN => {
+  return {
+    id: backendASN.id,
+    asnNumber: backendASN.asn_number,
+    customerId: backendASN.customer_id,
+    customerName: backendASN.customer_name || '',
+    expectedDate: backendASN.expected_date || '',
+    status: backendASN.status as 'pending' | 'in_progress' | 'completed' | 'cancelled',
+    createdAt: backendASN.created_at,
+  };
+};
+
+// Helper function to convert frontend ASN to backend format
+// FIXED: Now includes ALL required fields including customer_name
+const convertFrontendASNToBackend = (asn: Partial<ASN>): Record<string, string | undefined> => {
+  const backend: Record<string, string | undefined> = {};
+  
+  // Include ALL fields that backend expects
+  if (asn.id) backend.id = asn.id;
+  if (asn.asnNumber) backend.asn_number = asn.asnNumber;
+  if (asn.customerId) backend.customer_id = asn.customerId;
+  if (asn.customerName) backend.customer_name = asn.customerName; // CRITICAL FIX: Include customer_name
+  if (asn.expectedDate) backend.expected_date = asn.expectedDate;
+  if (asn.status) backend.status = asn.status;
+  if (asn.createdAt) backend.created_at = asn.createdAt;
+  
+  console.log('[DataContext] Converted frontend ASN to backend format:', backend);
+  
+  return backend;
+};
+
+export function DataProvider({ children }: { children: ReactNode }) {
+  const [deliveries, setDeliveriesState] = useState<Delivery[]>([]);
+  const [items, setItemsState] = useState<Item[]>([]);
+  const [receivingSessions, setReceivingSessionsState] = useState<ReceivingSession[]>([]);
+  const [customers, setCustomersState] = useState<Customer[]>([]);
+  const [slipRequests, setSlipRequestsState] = useState<SlipRequest[]>([]);
+  const [asns, setASNsState] = useState<ASN[]>([]);
+  const [extensivItems, setExtensivItemsState] = useState<Item[]>([]);
+  const [syncLogs, setSyncLogsState] = useState<SyncLog[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Track if initial data has been loaded to prevent race conditions
+  const initialLoadComplete = useRef(false);
+  
+  const [apiConfig, setAPIConfigState] = useState<APIConfig | null>(() => {
+    const saved = localStorage.getItem('apiConfig');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+    // Pre-configure with user's credentials
+    return {
+      smartsheet: {
+        apiToken: 'q9MgMjegggjqp24oi9sfaLVqJjnMFOMevnnqv',
+        sheetId: '8551818792488836',
+        autoSync: false,
+        syncInterval: 15,
+        columnMappings: {
+          containerNumber: 'PO # / Container #',
+          customerName: 'Customer Name',
+          poNumber: 'PO # / Container #',
+          door: 'Door #',
+          expectedDate: 'Date',
+          carrier: 'Carrier',
+          status: 'Status',
+          notes: 'Additional Information',
+          trackingNumber: '3PL # ',
+          done: 'Done',
+        },
+      },
+      extensiv: {
+        apiKey: '',
+        facilityId: '',
+        autoSync: false,
+        syncInterval: 30,
+      },
+    };
+  });
+
+  // Migration function to fix old session statuses
+  const migrateSessionStatuses = (sessions: ReceivingSession[]): ReceivingSession[] => {
+    let migrated = false;
+    const updated = sessions.map(session => {
+      // Fix old 'completed' status to 'pending-review'
+      if (session.status === 'completed') {
+        migrated = true;
+        console.log(`[Migration] Fixing session ${session.id}: 'completed' -> 'pending-review'`);
+        return { ...session, status: 'pending-review' as const };
+      }
+      return session;
+    });
+    
+    if (migrated) {
+      console.log('[Migration] Session statuses migrated successfully');
+      toast.success('Session data updated - please refresh the page');
+      // Save the migrated data back to localStorage
+      localStorage.setItem('receivingSessions', JSON.stringify(updated));
+    }
+    
+    return updated;
+  };
+
+  // Load data from localStorage on mount
+  useEffect(() => {
+    const savedDeliveries = localStorage.getItem('deliveries');
+    const savedItems = localStorage.getItem('items');
+    const savedSessions = localStorage.getItem('receivingSessions');
+    const savedCustomers = localStorage.getItem('customers');
+    const savedSlipRequests = localStorage.getItem('slipRequests');
+    const savedASNs = localStorage.getItem('asns');
+    const savedSyncLogs = localStorage.getItem('syncLogs');
+
+    if (savedDeliveries) setDeliveriesState(JSON.parse(savedDeliveries));
+    if (savedItems) setItemsState(JSON.parse(savedItems));
+    if (savedSessions) {
+      const sessions = JSON.parse(savedSessions);
+      console.log('[DataContext] Loaded sessions from localStorage:', sessions.length);
+      sessions.forEach((s: ReceivingSession, idx: number) => {
+        console.log(`[DataContext] Session ${idx + 1}:`, {
+          id: s.id,
+          status: s.status,
+          customer: s.customerName,
+          completedAt: s.completedAt
+        });
+      });
+      // Apply migration to fix old statuses
+      const migratedSessions = migrateSessionStatuses(sessions);
+      setReceivingSessionsState(migratedSessions);
+    }
+    if (savedCustomers) {
+      const loadedCustomers = JSON.parse(savedCustomers);
+      console.log('[DataContext] Loaded customers from localStorage:', loadedCustomers.length);
+      
+      // Deduplicate customers on load
+      const uniqueCustomers = deduplicateCustomers(loadedCustomers);
+      
+      if (uniqueCustomers.length < loadedCustomers.length) {
+        console.log(`[DataContext] Deduplication: ${loadedCustomers.length} -> ${uniqueCustomers.length} customers`);
+        toast.info(`Removed ${loadedCustomers.length - uniqueCustomers.length} duplicate customer entries`);
+      }
+      
+      setCustomersState(uniqueCustomers);
+    }
+    if (savedSlipRequests) setSlipRequestsState(JSON.parse(savedSlipRequests));
+    if (savedASNs) {
+      const loadedASNs = JSON.parse(savedASNs);
+      console.log('[DataContext] Loaded ASNs from localStorage:', loadedASNs.length);
+      setASNsState(loadedASNs);
+    }
+    if (savedSyncLogs) setSyncLogsState(JSON.parse(savedSyncLogs));
+
+    // Load items, customers AND ASNs from backend on mount, then mark initialization complete
+    const initializeBackendData = async () => {
+      try {
+        console.log('[DataContext] 🚀 Starting initial backend data load...');
+        await Promise.all([
+          loadItemsFromBackend(),
+          loadCustomersFromBackend(),
+          loadASNsFromBackend()
+        ]);
+        console.log('[DataContext] ✅ Initial backend data load complete');
+      } catch (error) {
+        console.error('[DataContext] ❌ Error during initial data load:', error);
+      } finally {
+        // Mark initial load as complete AFTER backend calls finish
+        initialLoadComplete.current = true;
+        console.log('[DataContext] Initial load complete, localStorage saves now enabled');
+      }
+    };
+    
+    initializeBackendData();
+  }, []);
+
+  // Save to localStorage whenever data changes (but only after initial load)
+  useEffect(() => {
+    if (!initialLoadComplete.current) return;
+    localStorage.setItem('deliveries', JSON.stringify(deliveries));
+  }, [deliveries]);
+
+  useEffect(() => {
+    if (!initialLoadComplete.current) return;
+    localStorage.setItem('items', JSON.stringify(items));
+  }, [items]);
+
+  useEffect(() => {
+    if (!initialLoadComplete.current) return;
+    console.log('[DataContext] Saving sessions to localStorage:', receivingSessions.length);
+    receivingSessions.forEach((s, idx) => {
+      console.log(`[DataContext] Saving session ${idx + 1}:`, {
+        id: s.id,
+        status: s.status,
+        customer: s.customerName
+      });
+    });
+    localStorage.setItem('receivingSessions', JSON.stringify(receivingSessions));
+  }, [receivingSessions]);
+
+  useEffect(() => {
+    if (!initialLoadComplete.current) return;
+    
+    // Always deduplicate before saving to localStorage
+    const uniqueCustomers = deduplicateCustomers(customers);
+    
+    if (uniqueCustomers.length !== customers.length) {
+      console.log(`[DataContext] Deduplicating before save: ${customers.length} -> ${uniqueCustomers.length}`);
+      // Update state with deduplicated customers (this will trigger this effect again, but with correct count)
+      setCustomersState(uniqueCustomers);
+      return;
+    }
+    
+    console.log('[DataContext] Saving customers to localStorage:', customers.length);
+    localStorage.setItem('customers', JSON.stringify(customers));
+    
+    // Also save to backend whenever customers change
+    if (customers.length > 0) {
+      customersAPI.saveCustomers(customers).catch(error => {
+        console.error('[DataContext] Failed to save customers to backend:', error);
+      });
+    }
+  }, [customers]);
+
+  useEffect(() => {
+    if (!initialLoadComplete.current) return;
+    localStorage.setItem('slipRequests', JSON.stringify(slipRequests));
+  }, [slipRequests]);
+
+  useEffect(() => {
+    if (!initialLoadComplete.current) return;
+    console.log('[DataContext] Saving ASNs to localStorage:', asns.length);
+    localStorage.setItem('asns', JSON.stringify(asns));
+    // Also cache to backend_asns for asnApi compatibility
+    asnAPI.storeASNs(asns.map(asn => ({
+      id: asn.id,
+      asn_number: asn.asnNumber,
+      customer_id: asn.customerId,
+      customer_name: asn.customerName,
+      expected_date: asn.expectedDate,
+      status: asn.status,
+      created_at: asn.createdAt,
+      updated_at: asn.createdAt,
+    })));
+  }, [asns]);
+
+  useEffect(() => {
+    if (!initialLoadComplete.current) return;
+    localStorage.setItem('syncLogs', JSON.stringify(syncLogs));
+  }, [syncLogs]);
+
+  useEffect(() => {
+    if (apiConfig) {
+      localStorage.setItem('apiConfig', JSON.stringify(apiConfig));
+    }
+  }, [apiConfig]);
+
+  const loadItemsFromBackend = async (customerId?: string) => {
+    try {
+      console.log('[DataContext] Loading items from backend for customer:', customerId || 'all');
+      const items = await itemsAPI.fetchItems(customerId);
+      console.log('[DataContext] Loaded items from backend:', items.length);
+      
+      // REPLACE instead of merge - backend is source of truth
+      setExtensivItemsState(items);
+      console.log('[DataContext] ✅ Items replaced with backend data');
+    } catch (error) {
+      console.error('[DataContext] ❌ Error loading items from backend:', error);
+      // Don't show error toast on initial load, just log it
+    }
+  };
+
+  const loadCustomersFromBackend = async () => {
+    try {
+      console.log('[DataContext] Loading customers from backend on app startup');
+      const backendCustomers = await customersAPI.fetchCustomers();
+      console.log('[DataContext] Loaded customers from backend:', backendCustomers.length);
+      
+      if (backendCustomers.length > 0) {
+        // REPLACE instead of merge - backend is source of truth
+        const deduplicated = deduplicateCustomers(backendCustomers);
+        setCustomersState(deduplicated);
+        console.log('[DataContext] ✅ Customers replaced with backend data:', deduplicated.length);
+      } else {
+        console.log('[DataContext] No customers in backend, keeping localStorage data');
+      }
+    } catch (error) {
+      console.error('[DataContext] ❌ Error loading customers from backend:', error);
+      // Don't show error toast on initial load, just log it
+    }
+  };
+
+  const loadASNsFromBackend = async () => {
+    try {
+      console.log('[DataContext] Loading ASNs from backend database on app startup');
+      const result = await asnAPI.fetchASNs();
+      
+      if (result.success && result.asns && result.asns.length > 0) {
+        console.log('[DataContext] Loaded ASNs from backend:', result.asns.length);
+        
+        // Convert backend ASNs to frontend format
+        const backendASNs = result.asns.map(convertBackendASNToFrontend);
+        
+        // REPLACE instead of merge - backend is source of truth
+        setASNsState(backendASNs);
+        console.log('[DataContext] ✅ ASNs replaced with backend data:', backendASNs.length);
+      } else {
+        console.log('[DataContext] No ASNs found in backend database');
+        // Keep localStorage data if backend is empty (backward compatibility)
+      }
+    } catch (error) {
+      console.error('[DataContext] ❌ Error loading ASNs from backend:', error);
+      // Don't show error toast on initial load, just log it
+    }
+  };
+
+  const forceFullSync = async () => {
+    console.log('[DataContext] 🔄 Force full sync - clearing localStorage cache');
+    
+    // Clear localStorage BEFORE loading from backend
+    localStorage.removeItem('asns');
+    localStorage.removeItem('extensivItems');
+    // Note: Don't clear customers as they might have local-only entries
+    
+    setIsLoading(true);
+    try {
+      await Promise.all([
+        loadItemsFromBackend(),
+        loadCustomersFromBackend(),
+        loadASNsFromBackend()
+      ]);
+      console.log('[DataContext] ✅ Force full sync complete');
+      toast.success('All data synced successfully');
+    } catch (error) {
+      console.error('[DataContext] ❌ Error during force sync:', error);
+      toast.error('Failed to sync all data');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getItemSyncStatus = async (customerId: string): Promise<SyncStatus | null> => {
+    try {
+      const result = await itemsAPI.getSyncStatus(customerId);
+      return result.syncStatus;
+    } catch (error) {
+      console.error('Error getting sync status:', error);
+      return null;
+    }
+  };
+
+  const addDelivery = (delivery: Delivery) => {
+    setDeliveriesState((prev) => [...prev, delivery]);
+  };
+
+  const updateDelivery = (id: string, updates: Partial<Delivery>) => {
+    setDeliveriesState((prev) => prev.map((d) => (d.id === id ? { ...d, ...updates } : d)));
+  };
+
+  const deleteDelivery = (id: string) => {
+    setDeliveriesState((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  const setDeliveries = (deliveries: Delivery[]) => {
+    setDeliveriesState(deliveries);
+  };
+
+  const addItem = (item: Item) => {
+    setItemsState((prev) => [...prev, item]);
+  };
+
+  const updateItem = (id: string, updates: Partial<Item>) => {
+    setItemsState((prev) => prev.map((i) => (i.id === id ? { ...i, ...updates } : i)));
+  };
+
+  const setItems = (items: Item[]) => {
+    setItemsState(items);
+  };
+
+  const setExtensivItems = (items: Item[]) => {
+    setExtensivItemsState(items);
+  };
+
+  const addReceivingSession = (session: ReceivingSession) => {
+    console.log('[DataContext] Adding new receiving session:', {
+      id: session.id,
+      status: session.status,
+      customer: session.customerName,
+      itemCount: session.items?.length
+    });
+    setReceivingSessionsState((prev) => [...prev, session]);
+  };
+
+  const updateReceivingSession = (id: string, updates: Partial<ReceivingSession>) => {
+    console.log('[DataContext] Updating receiving session:', id, updates);
+    setReceivingSessionsState((prev) => prev.map((s) => (s.id === id ? { ...s, ...updates } : s)));
+  };
+
+  const updateAPIConfig = (config: APIConfig) => {
+    setAPIConfigState(config);
+  };
+
+  const addCustomer = (customer: Customer) => {
+    setCustomersState((prev) => {
+      // Check if customer with same 3PL ID already exists
+      const exists = prev.find(c => c.thirdPartyLogisticsId === customer.thirdPartyLogisticsId);
+      if (exists) {
+        console.log('[DataContext] Customer with 3PL ID already exists, skipping add:', customer.thirdPartyLogisticsId);
+        return prev;
+      }
+      return [...prev, customer];
+    });
+  };
+
+  const updateCustomer = (id: string, updates: Partial<Customer>) => {
+    setCustomersState((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+  };
+
+  const deleteCustomer = (id: string) => {
+    setCustomersState((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const addSlipRequest = (request: SlipRequest) => {
+    setSlipRequestsState((prev) => [...prev, request]);
+  };
+
+  const updateSlipRequest = (id: string, updates: Partial<SlipRequest>) => {
+    setSlipRequestsState((prev) => prev.map((r) => (r.id === id ? { ...r, ...updates } : r)));
+  };
+
+  const addASN = async (asn: ASN) => {
+    console.log('[DataContext] ✅ Adding new ASN - FULL DATA:', JSON.stringify(asn, null, 2));
+    
+    // Optimistically update state first
+    setASNsState((prev) => [...prev, asn]);
+    
+    // Then save to backend with ENHANCED LOGGING
+    try {
+      const backendData = convertFrontendASNToBackend(asn);
+      console.log('[DataContext] 📤 Sending to backend API:', JSON.stringify(backendData, null, 2));
+      
+      const result = await asnAPI.createASN(backendData as asnAPI.CreateASNRequest);
+      
+      console.log('[DataContext] 📥 Backend response:', JSON.stringify(result, null, 2));
+      
+      if (result.success && result.asn) {
+        console.log('[DataContext] ✅ ASN saved to backend successfully! ID:', result.asn.id);
+        
+        // Update state with backend-generated data (e.g., timestamps)
+        const backendASN = convertBackendASNToFrontend(result.asn);
+        setASNsState((prev) => prev.map(a => a.id === asn.id ? backendASN : a));
+        
+        toast.success('ASN saved to database successfully');
+      } else {
+        console.error('[DataContext] ❌ Backend save failed:', result.error);
+        console.error('[DataContext] ❌ Error details:', result.details);
+        toast.error(`Failed to save ASN to database: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('[DataContext] ❌ Exception during backend save:', error);
+      toast.error('ASN created locally but failed to sync to database');
+    }
+  };
+
+  const updateASN = async (id: string, updates: Partial<ASN>) => {
+    console.log('[DataContext] Updating ASN:', id, updates);
+    
+    // Optimistically update state first
+    setASNsState((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
+    
+    // Then save to backend
+    try {
+      const backendUpdates = convertFrontendASNToBackend(updates);
+      const result = await asnAPI.updateASN(id, backendUpdates as asnAPI.UpdateASNRequest);
+      
+      if (result.success && result.asn) {
+        console.log('[DataContext] ASN updated in backend successfully:', result.asn.id);
+        
+        // Update state with backend data
+        const backendASN = convertBackendASNToFrontend(result.asn);
+        setASNsState((prev) => prev.map(a => a.id === id ? backendASN : a));
+      } else {
+        console.error('[DataContext] Failed to update ASN in backend:', result.error);
+        toast.error('ASN updated locally but failed to sync to database');
+      }
+    } catch (error) {
+      console.error('[DataContext] Error updating ASN in backend:', error);
+      toast.error('ASN updated locally but failed to sync to database');
+    }
+  };
+
+  const deleteASN = async (id: string) => {
+    console.log('[DataContext] Deleting ASN:', id);
+    
+    // Optimistically update state first
+    setASNsState((prev) => prev.filter((a) => a.id !== id));
+    
+    // Then delete from backend
+    try {
+      const result = await asnAPI.deleteASN(id);
+      
+      if (result.success) {
+        console.log('[DataContext] ASN deleted from backend successfully:', id);
+      } else {
+        console.error('[DataContext] Failed to delete ASN from backend:', result.error);
+        toast.error('ASN deleted locally but failed to sync to database');
+      }
+    } catch (error) {
+      console.error('[DataContext] Error deleting ASN from backend:', error);
+      toast.error('ASN deleted locally but failed to sync to database');
+    }
+  };
+
+  const syncFromSmartsheet = async () => {
+    if (!apiConfig?.smartsheet) {
+      toast.error('Smartsheet configuration is missing');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await smartsheetAPI.fetchDeliveries({
+        apiToken: apiConfig.smartsheet.apiToken,
+        sheetId: apiConfig.smartsheet.sheetId,
+        columnMappings: apiConfig.smartsheet.columnMappings,
+      });
+
+      setDeliveriesState(result.deliveries);
+      
+      const syncLog: SyncLog = {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        source: 'smartsheet',
+        status: 'success',
+        recordsProcessed: result.deliveries.length,
+        message: `Successfully synced ${result.deliveries.length} deliveries from Smartsheet`,
+      };
+      addSyncLog(syncLog);
+      
+      toast.success(`Synced ${result.deliveries.length} deliveries from Smartsheet`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const syncLog: SyncLog = {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        source: 'smartsheet',
+        status: 'error',
+        recordsProcessed: 0,
+        message: `Failed to sync: ${errorMessage}`,
+      };
+      addSyncLog(syncLog);
+      toast.error(`Failed to sync from Smartsheet: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const syncExtensivItems = async () => {
+    if (!apiConfig?.extensiv?.apiKey || !apiConfig?.extensiv?.facilityId) {
+      toast.error('Extensiv configuration is missing');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // This is a placeholder - actual Extensiv sync will be implemented
+      // when we integrate with the real Extensiv API
+      toast.info('Extensiv sync functionality will be implemented with real API integration');
+      
+      const syncLog: SyncLog = {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        source: 'extensiv',
+        status: 'success',
+        recordsProcessed: 0,
+        message: 'Extensiv sync placeholder - awaiting API integration',
+      };
+      addSyncLog(syncLog);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const syncLog: SyncLog = {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        source: 'extensiv',
+        status: 'error',
+        recordsProcessed: 0,
+        message: `Failed to sync: ${errorMessage}`,
+      };
+      addSyncLog(syncLog);
+      toast.error(`Failed to sync from Extensiv: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const addSyncLog = (log: SyncLog) => {
+    setSyncLogsState((prev) => [log, ...prev].slice(0, 100)); // Keep last 100 logs
+  };
+
+  return (
+    <DataContext.Provider
+      value={{
+        deliveries,
+        items,
+        receivingSessions,
+        apiConfig,
+        customers,
+        slipRequests,
+        asns,
+        extensivItems,
+        syncLogs,
+        isLoading,
+        addDelivery,
+        updateDelivery,
+        deleteDelivery,
+        setDeliveries,
+        addItem,
+        updateItem,
+        setItems,
+        setExtensivItems,
+        addReceivingSession,
+        updateReceivingSession,
+        updateAPIConfig,
+        addCustomer,
+        updateCustomer,
+        deleteCustomer,
+        addSlipRequest,
+        updateSlipRequest,
+        addASN,
+        updateASN,
+        deleteASN,
+        syncFromSmartsheet,
+        syncExtensivItems,
+        addSyncLog,
+        loadItemsFromBackend,
+        loadCustomersFromBackend,
+        loadASNsFromBackend,
+        forceFullSync,
+        getItemSyncStatus,
+      }}
+    >
+      {children}
+    </DataContext.Provider>
+  );
+}
+
+export function useData() {
+  const context = useContext(DataContext);
+  if (context === undefined) {
+    throw new Error('useData must be used within a DataProvider');
+  }
+  return context;
+}

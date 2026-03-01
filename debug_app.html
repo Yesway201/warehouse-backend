@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Debug Info</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0; }
+    .section { margin: 20px 0; padding: 15px; border: 1px solid #0f0; }
+    h2 { color: #0ff; }
+  </style>
+</head>
+<body>
+  <h1>App Debug Information</h1>
+  
+  <div class="section">
+    <h2>Dev Server Status</h2>
+    <p>Dev server is running at: <a href="http://localhost:5173" style="color: #0ff;">http://localhost:5173</a></p>
+    <p>The app loads correctly in the browser with login page visible</p>
+  </div>
+
+  <div class="section">
+    <h2>Build Status</h2>
+    <p>✅ Production build completed successfully</p>
+    <p>✅ dist/index.html exists (869 bytes)</p>
+    <p>✅ Assets compiled: index-BT-Tw7jc.js (1.08 MB), index-DYpZ-yuq.css (69.77 KB)</p>
+  </div>
+
+  <div class="section">
+    <h2>Issue</h2>
+    <p>⚠️ App Viewer shows blank white screen</p>
+    <p>Possible causes:</p>
+    <ul>
+      <li>Browser cache not cleared</li>
+      <li>App Viewer pointing to wrong port/URL</li>
+      <li>JavaScript errors in production build</li>
+      <li>Missing environment variables</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Next Steps</h2>
+    <ol>
+      <li>Check browser console for errors (F12)</li>
+      <li>Hard refresh: Ctrl+Shift+R (Windows) or Cmd+Shift+R (Mac)</li>
+      <li>Clear browser cache completely</li>
+      <li>Try opening in incognito/private window</li>
+    </ol>
+  </div>
+
+  <script>
+    console.log('Debug page loaded');
+    console.log('Current URL:', window.location.href);
+    console.log('User Agent:', navigator.userAgent);
+    
+    // Try to fetch the main app
+    fetch('http://localhost:5173/')
+      .then(r => r.text())
+      .then(html => {
+        console.log('Dev server response length:', html.length);
+        console.log('Dev server HTML preview:', html.substring(0, 200));
+      })
+      .catch(e => console.error('Failed to fetch dev server:', e));
+  </script>
+</body>
+</html>

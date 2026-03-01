@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser Sync Test - Warehouse App</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .success {
+            background: #d1fae5;
+            border: 1px solid #10b981;
+            color: #065f46;
+        }
+        .error {
+            background: #fee2e2;
+            border: 1px solid #ef4444;
+            color: #991b1b;
+        }
+        .info {
+            background: #dbeafe;
+            border: 1px solid #3b82f6;
+            color: #1e40af;
+        }
+        .loading {
+            color: #6b7280;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Browser Sync Test</h1>
+        <p>This test mimics exactly what App Viewer does when you click "Sync from Smartsheet"</p>
+        
+        <div>
+            <button id="testBtn" onclick="testSync()">Test Sync from Smartsheet</button>
+            <button onclick="clearResults()">Clear Results</button>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API_URL = 'https://warehouse-backend-production-4200.up.railway.app';
+        
+        const CONFIG = {
+            apiToken: 'q9MgMjegggjqp24oi9sfaLVqJjnMFOMevnnqv',
+            sheetId: '8551818792488836',
+            columnMappings: {
+                containerNumber: 'PO # / Container #',
+                customerName: 'Customer Name',
+                poNumber: 'PO # / Container #',
+                door: 'Door #',
+                expectedDate: 'Date',
+                carrier: 'Carrier',
+                status: 'Status',
+                notes: 'Additional Information',
+                trackingNumber: '3PL # ',
+                done: 'Done'
+            }
+        };
+
+        function addResult(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = message;
+            results.appendChild(div);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testSync() {
+            const btn = document.getElementById('testBtn');
+            btn.disabled = true;
+            clearResults();
+
+            addResult('🚀 Starting sync test...', 'info');
+            addResult(`📡 Target URL: ${API_URL}/api/smartsheet/fetch-deliveries`, 'info');
+
+            try {
+                // Step 1: Test basic connectivity
+                addResult('\n[Step 1] Testing basic connectivity...', 'info');
+                const healthResponse = await fetch(`${API_URL}/health`);
+                addResult(`✅ Health check: ${healthResponse.status} ${healthResponse.statusText}`, 'success');
+
+                // Step 2: Test the actual sync endpoint
+                addResult('\n[Step 2] Testing sync endpoint...', 'info');
+                addResult('Request details:', 'info');
+                addResult(`  Method: POST`, 'info');
+                addResult(`  Headers: Content-Type: application/json`, 'info');
+                addResult(`  Body: ${JSON.stringify(CONFIG, null, 2)}`, 'info');
+
+                const syncResponse = await fetch(`${API_URL}/api/smartsheet/fetch-deliveries`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(CONFIG)
+                });
+
+                addResult(`\n📊 Response Status: ${syncResponse.status} ${syncResponse.statusText}`, 
+                    syncResponse.ok ? 'success' : 'error');
+
+                // Log response headers
+                addResult('\n📋 Response Headers:', 'info');
+                syncResponse.headers.forEach((value, key) => {
+                    addResult(`  ${key}: ${value}`, 'info');
+                });
+
+                // Parse response
+                const data = await syncResponse.json();
+                
+                if (syncResponse.ok) {
+                    addResult(`\n✅ SUCCESS! Fetched ${data.count} deliveries`, 'success');
+                    addResult(`\nFirst 3 deliveries:`, 'info');
+                    data.deliveries.slice(0, 3).forEach((delivery, i) => {
+                        addResult(`\n${i + 1}. ${delivery.containerNumber} - ${delivery.customerName}`, 'success');
+                        addResult(`   Status: ${delivery.status || 'N/A'}`, 'success');
+                        addResult(`   Expected: ${delivery.expectedDate || 'N/A'}`, 'success');
+                    });
+                } else {
+                    addResult(`\n❌ FAILED: ${JSON.stringify(data, null, 2)}`, 'error');
+                }
+
+            } catch (error) {
+                addResult(`\n❌ FETCH FAILED: ${error.message}`, 'error');
+                addResult(`\nError details:`, 'error');
+                addResult(`  Name: ${error.name}`, 'error');
+                addResult(`  Message: ${error.message}`, 'error');
+                
+                if (error.message.includes('Failed to fetch')) {
+                    addResult(`\n🔍 "Failed to fetch" typically means:`, 'error');
+                    addResult(`  1. CORS preflight (OPTIONS) request failed`, 'error');
+                    addResult(`  2. Network connectivity issue`, 'error');
+                    addResult(`  3. Backend server is down`, 'error');
+                    addResult(`  4. Browser security policy blocking the request`, 'error');
+                    addResult(`\n💡 Check browser console (F12) for more details`, 'info');
+                }
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Auto-run test on page load
+        window.addEventListener('load', () => {
+            addResult('🎯 Ready to test! Click the button above or check the browser console (F12) for detailed network logs.', 'info');
+        });
+    </script>
+</body>
+</html>

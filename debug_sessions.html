@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Sessions</title>
+</head>
+<body>
+    <h1>Debug Receiving Sessions</h1>
+    <div id="output"></div>
+    <script>
+        const sessions = JSON.parse(localStorage.getItem('receivingSessions') || '[]');
+        const output = document.getElementById('output');
+        
+        output.innerHTML = '<h2>All Sessions in localStorage:</h2>';
+        output.innerHTML += `<p><strong>Total Sessions: ${sessions.length}</strong></p>`;
+        
+        sessions.forEach((session, idx) => {
+            output.innerHTML += `
+                <div style="border: 1px solid #ccc; padding: 10px; margin: 10px 0;">
+                    <h3>Session ${idx + 1}</h3>
+                    <p><strong>ID:</strong> ${session.id}</p>
+                    <p><strong>Status:</strong> <span style="color: red; font-weight: bold;">${session.status}</span></p>
+                    <p><strong>Customer:</strong> ${session.customerName}</p>
+                    <p><strong>Container:</strong> ${session.containerNumber}</p>
+                    <p><strong>Type:</strong> ${session.type}</p>
+                    <p><strong>Started By:</strong> ${session.startedBy}</p>
+                    <p><strong>Completed At:</strong> ${session.completedAt || 'Not completed'}</p>
+                    <p><strong>Synced to Extensiv:</strong> ${session.syncedToExtensiv || false}</p>
+                    <p><strong>Items:</strong> ${session.items?.length || 0}</p>
+                </div>
+            `;
+        });
+        
+        if (sessions.length === 0) {
+            output.innerHTML += '<p style="color: red;">No sessions found in localStorage!</p>';
+        }
+    </script>
+</body>
+</html>
