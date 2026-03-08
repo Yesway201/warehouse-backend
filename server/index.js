@@ -125,15 +125,39 @@ app.get('/api/debug/routes', (req, res) => {
   res.json({ routes });
 });
 
-// Serve static frontend files from public/
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static frontend files from public/ (if directory exists)
+const publicPath = path.join(__dirname, 'public');
+app.use(express.static(publicPath));
 
-// SPA catch-all: serve index.html for any non-API routes
+// Also support /health without /api prefix for convenience
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    database: process.env.DATABASE_URL ? 'configured' : 'not configured',
+    emailService: process.env.RESEND_API_KEY ? 'configured' : 'not configured'
+  });
+});
+
+// SPA catch-all: serve index.html for any non-API routes (only if file exists)
 app.get('*', (req, res) => {
-  if (!req.path.startsWith('/api/')) {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  } else {
+  if (req.path.startsWith('/api/')) {
     res.status(404).json({ error: 'API endpoint not found' });
+  } else {
+    const indexPath = path.join(publicPath, 'index.html');
+    import('fs').then(fs => {
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        // No frontend build deployed - return helpful message
+        res.json({ 
+          status: 'ok',
+          message: 'Warehouse Management Backend API is running. Frontend not deployed here.',
+          api: '/api/health',
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
   }
 });
 
