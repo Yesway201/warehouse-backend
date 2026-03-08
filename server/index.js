@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import extensivRoutes from './routes/extensiv.js';
 import smartsheetRoutes from './routes/smartsheet.js';
@@ -125,8 +126,16 @@ app.get('/api/debug/routes', (req, res) => {
   res.json({ routes });
 });
 
-// Serve static frontend files from public/ (if directory exists)
-const publicPath = path.join(__dirname, 'public');
+// Serve static frontend files from public/ (check multiple possible locations)
+const publicPathLocal = path.join(__dirname, 'public');        // server/public/ (if copied here)
+const publicPathRoot = path.join(__dirname, '..', 'public');   // ../public/ (repo root)
+const publicPath = fs.existsSync(path.join(publicPathLocal, 'index.html'))
+  ? publicPathLocal
+  : fs.existsSync(path.join(publicPathRoot, 'index.html'))
+    ? publicPathRoot
+    : publicPathLocal; // fallback
+console.log(`[Server] Serving static files from: ${publicPath}`);
+console.log(`[Server] index.html exists: ${fs.existsSync(path.join(publicPath, 'index.html'))}`);
 app.use(express.static(publicPath));
 
 // Also support /health without /api prefix for convenience
@@ -145,19 +154,17 @@ app.get('*', (req, res) => {
     res.status(404).json({ error: 'API endpoint not found' });
   } else {
     const indexPath = path.join(publicPath, 'index.html');
-    import('fs').then(fs => {
-      if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        // No frontend build deployed - return helpful message
-        res.json({ 
-          status: 'ok',
-          message: 'Warehouse Management Backend API is running. Frontend not deployed here.',
-          api: '/api/health',
-          timestamp: new Date().toISOString()
-        });
-      }
-    });
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      // No frontend build deployed - return helpful message
+      res.json({ 
+        status: 'ok',
+        message: 'Warehouse Management Backend API is running. Frontend not deployed here.',
+        api: '/api/health',
+        timestamp: new Date().toISOString()
+      });
+    }
   }
 });
 
