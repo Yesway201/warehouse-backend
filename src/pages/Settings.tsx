@@ -22,6 +22,7 @@ import type { SmartsheetColumn } from '@/lib/smartsheetApi';
 import { useData } from '@/contexts/DataContext';
 import { toast } from 'sonner';
 import { useItemSync } from '@/hooks/useItemSync';
+import { loadAppSettings, saveAppSettings } from '@/lib/appSettingsApi';
 import {
   Table,
   TableBody,
@@ -90,11 +91,11 @@ export default function Settings() {
   const [columnMappings, setColumnMappings] = useState<ColumnMapping[]>(DEFAULT_COLUMN_MAPPINGS);
   const [savingMappings, setSavingMappings] = useState(false);
 
-  // Smartsheet Auto-Sync Configuration
+  // Smartsheet Auto-Sync Configuration (loaded from backend)
   const [smartsheetAutoSyncConfig, setSmartsheetAutoSyncConfig] = useState({
-    enabled: localStorage.getItem('smartsheet_auto_sync_enabled') === 'true',
-    intervalMinutes: parseInt(localStorage.getItem('smartsheet_auto_sync_interval') || '15'),
-    syncOnStartup: localStorage.getItem('smartsheet_auto_sync_on_startup') === 'true',
+    enabled: false,
+    intervalMinutes: 15,
+    syncOnStartup: false,
   });
 
   // Smartsheet test result
@@ -128,13 +129,13 @@ export default function Settings() {
   const customers = dataContext.customers || [];
   const extensivItems = dataContext.extensivItems || [];
 
-  // Item Database Configuration
+  // Item Database Configuration (loaded from backend)
   const [itemDbConfig, setItemDbConfig] = useState({
-    autoSync: localStorage.getItem('item_db_auto_sync') === 'true',
-    syncInterval: parseInt(localStorage.getItem('item_db_sync_interval') || '60'),
-    enableNotifications: localStorage.getItem('item_db_notifications') === 'true',
-    lowStockThreshold: parseInt(localStorage.getItem('item_db_low_stock') || '10'),
-    syncOnStartup: localStorage.getItem('item_db_sync_startup') === 'true',
+    autoSync: false,
+    syncInterval: 60,
+    enableNotifications: false,
+    lowStockThreshold: 10,
+    syncOnStartup: false,
   });
 
   // Item sync functionality
@@ -182,6 +183,31 @@ export default function Settings() {
       } else {
         setExtensivCredentialsLoaded(false);
         console.log('[Settings] ❌ No Extensiv credentials found on backend');
+      }
+
+      // Load app settings (auto-sync, item DB) from backend
+      console.log('[Settings] Loading app settings from backend...');
+      const appSettings = await loadAppSettings();
+      if (appSettings) {
+        // Smartsheet auto-sync settings
+        if (appSettings.smartsheet_auto_sync_enabled !== undefined) {
+          setSmartsheetAutoSyncConfig({
+            enabled: appSettings.smartsheet_auto_sync_enabled ?? false,
+            intervalMinutes: appSettings.smartsheet_auto_sync_interval ?? 15,
+            syncOnStartup: appSettings.smartsheet_auto_sync_on_startup ?? false,
+          });
+        }
+        // Item DB settings
+        if (appSettings.item_db_auto_sync !== undefined) {
+          setItemDbConfig({
+            autoSync: appSettings.item_db_auto_sync ?? false,
+            syncInterval: appSettings.item_db_sync_interval ?? 60,
+            enableNotifications: appSettings.item_db_notifications ?? false,
+            lowStockThreshold: appSettings.item_db_low_stock ?? 10,
+            syncOnStartup: appSettings.item_db_sync_startup ?? false,
+          });
+        }
+        console.log('[Settings] ✅ App settings loaded from backend');
       }
     };
 
@@ -307,11 +333,21 @@ export default function Settings() {
     }
   };
 
-  const handleSmartsheetAutoSyncSave = () => {
+  const handleSmartsheetAutoSyncSave = async () => {
+    const saved = await saveAppSettings({
+      smartsheet_auto_sync_enabled: smartsheetAutoSyncConfig.enabled,
+      smartsheet_auto_sync_interval: smartsheetAutoSyncConfig.intervalMinutes,
+      smartsheet_auto_sync_on_startup: smartsheetAutoSyncConfig.syncOnStartup,
+    });
+    // Also save to localStorage for the auto-sync hook to read
     localStorage.setItem('smartsheet_auto_sync_enabled', String(smartsheetAutoSyncConfig.enabled));
     localStorage.setItem('smartsheet_auto_sync_interval', String(smartsheetAutoSyncConfig.intervalMinutes));
     localStorage.setItem('smartsheet_auto_sync_on_startup', String(smartsheetAutoSyncConfig.syncOnStartup));
-    toast.success('Auto-sync settings saved. Reload the page to apply changes.');
+    if (saved) {
+      toast.success('Auto-sync settings saved to server. Reload the page to apply changes.');
+    } else {
+      toast.warning('Settings saved locally but failed to save to server. They may not persist across devices.');
+    }
   };
 
   const handleExtensivSave = async () => {
@@ -395,13 +431,25 @@ export default function Settings() {
     setColumnMappings(columnMappings.filter((_, i) => i !== index));
   };
 
-  const handleItemDbSave = () => {
+  const handleItemDbSave = async () => {
+    const saved = await saveAppSettings({
+      item_db_auto_sync: itemDbConfig.autoSync,
+      item_db_sync_interval: itemDbConfig.syncInterval,
+      item_db_notifications: itemDbConfig.enableNotifications,
+      item_db_low_stock: itemDbConfig.lowStockThreshold,
+      item_db_sync_startup: itemDbConfig.syncOnStartup,
+    });
+    // Also save to localStorage for hooks that read from it
     localStorage.setItem('item_db_auto_sync', String(itemDbConfig.autoSync));
     localStorage.setItem('item_db_sync_interval', String(itemDbConfig.syncInterval));
     localStorage.setItem('item_db_notifications', String(itemDbConfig.enableNotifications));
     localStorage.setItem('item_db_low_stock', String(itemDbConfig.lowStockThreshold));
     localStorage.setItem('item_db_sync_startup', String(itemDbConfig.syncOnStartup));
-    toast.success('Item Database settings saved');
+    if (saved) {
+      toast.success('Item Database settings saved to server');
+    } else {
+      toast.warning('Settings saved locally but failed to save to server. They may not persist across devices.');
+    }
   };
 
   const handleSyncItems = async () => {

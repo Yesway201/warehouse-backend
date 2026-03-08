@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { syncDeliveriesFromSmartsheet, type SyncResult } from '@/lib/smartsheetApi';
+import { loadAppSettings } from '@/lib/appSettingsApi';
 import { toast } from 'sonner';
 
 interface AutoSyncConfig {
@@ -20,14 +21,38 @@ export function useSmartsheetAutoSync(options: UseSmartsheetAutoSyncOptions) {
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
+  const backendLoadedRef = useRef(false);
 
-  // Load config from localStorage
+  // Load config from localStorage (with backend hydration on first call)
   const getConfig = (): AutoSyncConfig => {
     return {
       enabled: localStorage.getItem('smartsheet_auto_sync_enabled') === 'true',
       intervalMinutes: parseInt(localStorage.getItem('smartsheet_auto_sync_interval') || '15'),
       syncOnStartup: localStorage.getItem('smartsheet_auto_sync_on_startup') === 'true',
     };
+  };
+
+  // Hydrate localStorage from backend (runs once on mount)
+  const hydrateFromBackend = async (): Promise<AutoSyncConfig> => {
+    try {
+      const appSettings = await loadAppSettings();
+      if (appSettings && appSettings.smartsheet_auto_sync_enabled !== undefined) {
+        const config: AutoSyncConfig = {
+          enabled: appSettings.smartsheet_auto_sync_enabled ?? false,
+          intervalMinutes: appSettings.smartsheet_auto_sync_interval ?? 15,
+          syncOnStartup: appSettings.smartsheet_auto_sync_on_startup ?? false,
+        };
+        // Write to localStorage so subsequent reads are fast
+        localStorage.setItem('smartsheet_auto_sync_enabled', String(config.enabled));
+        localStorage.setItem('smartsheet_auto_sync_interval', String(config.intervalMinutes));
+        localStorage.setItem('smartsheet_auto_sync_on_startup', String(config.syncOnStartup));
+        console.log('[AutoSync] Hydrated localStorage from backend settings');
+        return config;
+      }
+    } catch (error) {
+      console.warn('[AutoSync] Failed to hydrate from backend:', error);
+    }
+    return getConfig();
   };
 
   // Save config to localStorage
@@ -138,21 +163,35 @@ export function useSmartsheetAutoSync(options: UseSmartsheetAutoSyncOptions) {
     }
   };
 
-  // Initialize auto-sync on mount
+  // Initialize auto-sync on mount - hydrate from backend first
   useEffect(() => {
     mountedRef.current = true;
-    const config = getConfig();
 
-    // Sync on startup if enabled
-    if (config.syncOnStartup && isConfigured) {
-      console.log('[AutoSync] Performing startup sync...');
-      performSync(true);
-    }
+    const initAutoSync = async () => {
+      // Hydrate localStorage from backend on first load
+      let config: AutoSyncConfig;
+      if (!backendLoadedRef.current) {
+        config = await hydrateFromBackend();
+        backendLoadedRef.current = true;
+      } else {
+        config = getConfig();
+      }
 
-    // Start auto-sync if enabled
-    if (config.enabled && isConfigured) {
-      startAutoSync(config.intervalMinutes);
-    }
+      if (!mountedRef.current) return;
+
+      // Sync on startup if enabled
+      if (config.syncOnStartup && isConfigured) {
+        console.log('[AutoSync] Performing startup sync...');
+        performSync(true);
+      }
+
+      // Start auto-sync if enabled
+      if (config.enabled && isConfigured) {
+        startAutoSync(config.intervalMinutes);
+      }
+    };
+
+    initAutoSync();
 
     return () => {
       mountedRef.current = false;
